@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp2.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IAPI_Assembly\IAPI_Assembly.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="API-1.1">
+      <HintPath>..\iapi_lib\API-1.1.dll</HintPath>
+    </Reference>
+    <Reference Include="API-2.0">
+      <HintPath>..\iapi_lib\API-2.0.dll</HintPath>
+    </Reference>
+    <Reference Include="Fusion.API-1.0">
+      <HintPath>..\iapi_lib\tribrid\Fusion.API-1.0.dll</HintPath>
+    </Reference>
+    <Reference Include="Spectrum-1.0">
+      <HintPath>..\iapi_lib\Spectrum-1.0.dll</HintPath>
+    </Reference>
+    <Reference Include="Thermo.TNG.Factory">
+      <HintPath>..\iapi_lib\tribrid\Thermo.TNG.Factory.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
