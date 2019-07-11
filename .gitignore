@@ -115,3 +115,4 @@ dmypy.json
 
 # CLMS-specific ignores
 models/*
+.idea/*
