@@ -1,0 +1,34 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = "*"
+pandas = "*"
+scipy = "*"
+ipython = "*"
+matplotlib = "*"
+pythonnet = {version = "*",os_name = "== 'nt'"}
+jupyter = "*"
+notebook = "*"
+pymzml = "*"
+blist = "*"
+scikit-learn = "==0.20.3"
+pyyaml = "*"
+events = "*"
+psims = "*"
+tornado = "*"
+pynumpress = "*"
+tqdm = "*"
+joblib = "*"
+ipyparallel = "*"
+seaborn = "*"
+keras = "*"
+tensorflow = "*"
+gpy = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.6.6"
