@@ -474,6 +474,7 @@ class MultiSampleCreator(LoggerMixin):
                                                    p=[self.change_probabilities[i], 1 - self.change_probabilities[i]])
                                   for i in range(len(self.classes) - 1)])
         self.missing = self._get_missing_chemicals(chemical_statuses)
+        self.missing_chemicals = [np.array(self.original_dataset)[miss].tolist() for miss in self.missing]
         for index_chemical in range(len(chemical_statuses)):
             chemical_statuses[index_chemical][self.missing[index_chemical]] = "missing"
         return chemical_statuses
