@@ -224,7 +224,7 @@ class ChemicalCreator(LoggerMixin):
         self.database = database
 
     def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, use_database=True, alpha=math.inf,
-               fixed_mz=False, adduct_proportion_cutoff=0.05):
+               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None):
         self.mz_range = mz_range
         self.rt_range = rt_range
         self.min_ms1_intensity = min_ms1_intensity
@@ -263,12 +263,12 @@ class ChemicalCreator(LoggerMixin):
         chemicals = []
         # load first ROI file
         current_ROI = 0
-        ROIs = self._load_ROI_file(current_ROI)
+        ROIs = self._load_ROI_file(current_ROI, roi_rt_range)
         ROI_intensities = np.array([r.max_intensity for r in ROIs])
         for i in range(n_ms1):
             if i == sum(split[0:(current_ROI + 1)]):
                 current_ROI += 1
-                ROIs = self._load_ROI_file(current_ROI)
+                ROIs = self._load_ROI_file(current_ROI, roi_rt_range)
                 ROI_intensities = np.array([r.max_intensity for r in ROIs])
             if self.use_database == True:
                 formula = self.formula_list[i]
@@ -295,7 +295,7 @@ class ChemicalCreator(LoggerMixin):
         split[0:int(self.n_ms1_peaks - sum(split))] += 1
         return split
 
-    def _load_ROI_file(self, file_index):
+    def _load_ROI_file(self, file_index, roi_rt_range=None):
         num_ROI = 0
         for i in range(len(self.ROI_sources)):
             len_ROI = len(glob.glob(self.ROI_sources[i] + '\\*.p'))
@@ -303,8 +303,17 @@ class ChemicalCreator(LoggerMixin):
                 ROI_file = glob.glob(self.ROI_sources[i] + '\\*.p')[file_index - num_ROI]
                 ROI = load_obj(ROI_file)
                 self.logger.debug("Loaded {}".format(ROI_file))
+                if roi_rt_range is not None:
+                    ROI = self._filter_ROI(ROI, roi_rt_range)
                 return ROI
             num_ROI += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+
+    def _filter_ROI(self, ROI, roi_rt_range):
+        lower = roi_rt_range[0]
+        upper = roi_rt_range[1]
+        chem = ROI[0]
+        results = [chem for chem in ROI if lower < np.abs(chem.chromatogram.max_rt - chem.chromatogram.min_rt) < upper]
+        return results
 
     def _get_ROI_idx(self, ROI_intensities, intensity):
         return (np.abs(ROI_intensities - intensity)).argmin()
