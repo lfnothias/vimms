@@ -190,6 +190,15 @@ class KnownChemical(Chemical):
         return 'KnownChemical - %r rt=%.2f max_intensity=%.2f' % (
             self.formula.formula_string, self.rt, self.max_intensity)
 
+    def __eq__(self, other):
+        if not isinstance(other, KnownChemical):
+            return False
+        return self.formula.formula_string == other.formula.formula_string
+
+    def __hash__(self):
+        return hash(self.formula.formula_string)
+
+
 
 class MSN(Chemical):
     """
