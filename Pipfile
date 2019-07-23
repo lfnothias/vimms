@@ -9,11 +9,9 @@ pandas = "*"
 scipy = "*"
 ipython = "*"
 matplotlib = "*"
-pythonnet = {version = "*",os_name = "== 'nt'"}
 jupyter = "*"
 notebook = "*"
 pymzml = "*"
-blist = "*"
 scikit-learn = "==0.20.3"
 pyyaml = "*"
 events = "*"
@@ -24,11 +22,8 @@ tqdm = "*"
 joblib = "*"
 ipyparallel = "*"
 seaborn = "*"
-keras = "*"
-tensorflow = "*"
-gpy = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.7.3"
+python_version = "3"
