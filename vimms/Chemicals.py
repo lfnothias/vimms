@@ -3,6 +3,7 @@ import glob
 import math
 import random
 import re
+import os
 
 import numpy as np
 import scipy
@@ -123,13 +124,17 @@ class Adducts(object):
 
     def _get_adduct_proportions(self):
         # TODO: replace this with something proper
-        prior = np.ones(len(self.adduct_names)) * 0.1
-        prior[0] = 1.0  # give more weight to the first one, i.e. M+H
-        proportions = np.random.dirichlet(prior)
-        while max(proportions) < 0.2:
-            proportions = np.random.dirichlet(prior)
-        proportions[np.where(proportions < self.adduct_proportion_cutoff)] = 0
-        proportions = proportions / max(proportions)
+        # prior = np.ones(len(self.adduct_names)) * 0.1
+        # prior[0] = 1.0  # give more weight to the first one, i.e. M+H
+        # proportions = np.random.dirichlet(prior)
+        # while max(proportions) < 0.2:
+        #     proportions = np.random.dirichlet(prior)
+        # proportions[np.where(proportions < self.adduct_proportion_cutoff)] = 0
+        # proportions = proportions / max(proportions)
+
+        # hack by simon to ditch adducts
+        proportions = np.zeros(len(self.adduct_names))
+        proportions[0] = 1.0
         proportions.tolist()
         return proportions
 
@@ -290,7 +295,7 @@ class ChemicalCreator(LoggerMixin):
     def _get_n_ROI_files(self):
         count = 0
         for i in range(len(self.ROI_sources)):
-            count += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            count += len(glob.glob(os.path.join(self.ROI_sources[i],'*.p')))
         split = np.array([int(np.floor(self.n_ms1_peaks / count)) for i in range(count)])
         split[0:int(self.n_ms1_peaks - sum(split))] += 1
         return split
@@ -298,9 +303,9 @@ class ChemicalCreator(LoggerMixin):
     def _load_ROI_file(self, file_index, roi_rt_range=None):
         num_ROI = 0
         for i in range(len(self.ROI_sources)):
-            len_ROI = len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            len_ROI = len(glob.glob(os.path.join(self.ROI_sources[i],'*.p')))
             if len_ROI > file_index:
-                ROI_file = glob.glob(self.ROI_sources[i] + '\\*.p')[file_index - num_ROI]
+                ROI_file = glob.glob(os.path.join(self.ROI_sources[i],'*.p'))[file_index - num_ROI]
                 ROI = load_obj(ROI_file)
                 self.logger.debug("Loaded {}".format(ROI_file))
                 if roi_rt_range is not None:
@@ -473,17 +478,25 @@ class MultiSampleCreator(LoggerMixin):
             self.logger.debug("Dataset {} of {} created.".format(index_sample + 1, sum(self.n_samples)))
             new_sample = copy.deepcopy(self.original_dataset)
             which_class = np.where(np.array(self.classes) == self.sample_classes[index_sample])
+            temp_missing = np.copy(np.array(self.chemical_statuses)[which_class][0])
             for index_chemical in range(len(new_sample)):
                 if not np.array(self.chemical_statuses)[which_class][0][index_chemical] == "missing":
+                    # get here if it's not missing at the class level
+                    # also have some missing at random (p = 0.3)
+                    if np.random.rand() < 0.3:
+                        temp_missing[index_chemical] = 'missing'
+                        continue  # missing at random
                     original_intensity = new_sample[index_chemical].max_intensity
                     intensity = self._get_intensity(original_intensity, which_class, index_chemical)
                     adjusted_intensity = self._get_experimental_factor_effect(intensity, index_sample, index_chemical)
                     noisy_adjusted_intensity = self._get_noisy_intensity(adjusted_intensity)
                     new_sample[index_chemical].max_intensity = noisy_adjusted_intensity.tolist()[0]
-            chemicals_to_keep = np.where((np.array(self.chemical_statuses)[which_class][0]) != "missing")
+
+            # chemicals_to_keep = np.where((np.array(self.chemical_statuses)[which_class][0]) != "missing")
+            chemicals_to_keep = np.where(temp_missing != "missing")
             new_sample = np.array(new_sample)[chemicals_to_keep].tolist()
             if self.save_location is not None:
-                save_obj(new_sample, self.save_location + '\\sample_%d.p' % index_sample)
+                save_obj(new_sample, os.path.join(self.save_location,'sample_%d.p' % index_sample))
             self.samples.append(new_sample)
 
     def _get_chemical_statuses(self):
