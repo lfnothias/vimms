@@ -55,6 +55,7 @@ def load_obj(filename):
             return pickle.load(f)
     except OSError:
         logging.getLogger().warning('Old, invalid or missing pickle in %s. Please regenerate this file.' % filename)
+        return None
 
 
 def chromatogramDensityNormalisation(rts, intensities):
