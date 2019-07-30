@@ -119,3 +119,5 @@ models/*
 Pipfile.lock
 examples/hmdb_compounds.p
 examples/hmdb_metabolites.zip
+examples/manuscript_data.zip
+examples/manuscript_data/
