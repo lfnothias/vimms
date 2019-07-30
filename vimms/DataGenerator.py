@@ -1,15 +1,74 @@
 import copy
 import glob
 import os
+import xml.etree.ElementTree
 
 import math
 import numpy as np
 import pandas as pd
 import pylab as plt
 import pymzml
+import requests
 from sklearn.neighbors import KernelDensity
+from tqdm import tqdm
+import zipfile
 
+from vimms.Chemicals import DatabaseCompound
 from vimms.Common import LoggerMixin, MZ, INTENSITY, RT, N_PEAKS, SCAN_DURATION, MZ_INTENSITY_RT
+
+
+def download_file(url):
+    r = requests.get(url, stream=True)
+    total_size = int(r.headers.get('content-length', 0));
+    block_size = 1024
+    current_size = 0
+    out_file = url.rsplit('/', 1)[-1] # get the last part in url
+    print('Downloaded %s' % out_file)
+    with open(out_file, 'wb') as f:
+        for data in tqdm(r.iter_content(block_size), total=math.ceil(total_size//block_size) , unit='KB', unit_scale=True):
+            current_size += len(data)
+            f.write(data)
+    assert current_size == total_size
+    return out_file
+
+
+def extract_hmdb_metabolite(out_file):
+    # if out_file is zipped then extract the xml file inside
+    try:
+        # extract from zip file
+        zf = zipfile.ZipFile(out_file, 'r')
+        metabolite_xml_file = zf.namelist()[0] # assume there's only a single file inside the zip file
+        f = zf.open(metabolite_xml_file)
+    except zipfile.BadZipFile: # oops not a zip file
+        f = out_file
+
+    # loops through file and extract the necessary element text to create a DatabaseCompound
+    db = xml.etree.ElementTree.parse(f).getroot()
+    compounds = []
+    prefix = '{http://www.hmdb.ca}'
+    for metabolite_element in db:
+        row = [None, None, None, None, None, None]
+        for element in metabolite_element:
+            if element.tag == (prefix + 'name'):
+                row[0] = element.text
+            elif element.tag == (prefix + 'chemical_formula'):
+                row[1] = element.text
+            elif element.tag == (prefix + 'monisotopic_molecular_weight'):
+                row[2] = element.text
+            elif element.tag == (prefix + 'smiles'):
+                row[3] = element.text
+            elif element.tag == (prefix + 'inchi'):
+                row[4] = element.text
+            elif element.tag == (prefix + 'inchikey'):
+                row[5] = element.text
+
+        # if all fields are present, then add them as a DatabaseCompound
+        if None not in row:
+            compound = DatabaseCompound(row[0], row[1], row[2], row[3], row[4], row[5])
+            compounds.append(compound)
+
+    print('Loaded %d DatabaseCompounds from %s' % (len(compounds), out_file))
+    return compounds
 
 
 class Peak(object):
