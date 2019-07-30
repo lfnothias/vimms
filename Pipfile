@@ -22,6 +22,7 @@ tqdm = "*"
 joblib = "*"
 ipyparallel = "*"
 seaborn = "*"
+requests = "*"
 
 [dev-packages]
 
