@@ -25,7 +25,7 @@ PROTON_MASS = 1.00727645199076
 
 
 def create_if_not_exist(out_dir):
-    if not os.path.exists(out_dir):
+    if not os.path.exists(out_dir) and len(out_dir) > 0:
         print('Created %s' % out_dir)
         pathlib.Path(out_dir).mkdir(parents=True, exist_ok=True)
 

@@ -17,13 +17,16 @@ from vimms.Chemicals import DatabaseCompound
 from vimms.Common import LoggerMixin, MZ, INTENSITY, RT, N_PEAKS, SCAN_DURATION, MZ_INTENSITY_RT
 
 
-def download_file(url):
+def download_file(url, out_file=None):
     r = requests.get(url, stream=True)
     total_size = int(r.headers.get('content-length', 0));
     block_size = 1024
     current_size = 0
-    out_file = url.rsplit('/', 1)[-1] # get the last part in url
-    print('Downloaded %s' % out_file)
+
+    if out_file is None:
+        out_file = url.rsplit('/', 1)[-1] # get the last part in url
+    print('Downloading %s' % out_file)
+
     with open(out_file, 'wb') as f:
         for data in tqdm(r.iter_content(block_size), total=math.ceil(total_size//block_size) , unit='KB', unit_scale=True):
             current_size += len(data)
@@ -32,15 +35,29 @@ def download_file(url):
     return out_file
 
 
-def extract_hmdb_metabolite(out_file):
+def extract_zip_file(in_file, delete=True):
+    print('Extracting %s' % in_file)
+    with zipfile.ZipFile(file=in_file) as zip_file:
+        for file in tqdm(iterable=zip_file.namelist(), total=len(zip_file.namelist())):
+            zip_file.extract(member=file)
+
+    if delete:
+        print('Deleting %s' % in_file)
+        os.remove(in_file)
+
+
+def extract_hmdb_metabolite(in_file, delete=True):
+    print('Extracting HMDB metabolites from %s' % in_file)
+
     # if out_file is zipped then extract the xml file inside
     try:
         # extract from zip file
-        zf = zipfile.ZipFile(out_file, 'r')
+        zf = zipfile.ZipFile(in_file, 'r')
         metabolite_xml_file = zf.namelist()[0] # assume there's only a single file inside the zip file
         f = zf.open(metabolite_xml_file)
     except zipfile.BadZipFile: # oops not a zip file
-        f = out_file
+        zf = None
+        f = in_file
 
     # loops through file and extract the necessary element text to create a DatabaseCompound
     db = xml.etree.ElementTree.parse(f).getroot()
@@ -66,8 +83,16 @@ def extract_hmdb_metabolite(out_file):
         if None not in row:
             compound = DatabaseCompound(row[0], row[1], row[2], row[3], row[4], row[5])
             compounds.append(compound)
+    print('Loaded %d DatabaseCompounds from %s' % (len(compounds), in_file))
 
-    print('Loaded %d DatabaseCompounds from %s' % (len(compounds), out_file))
+    f.close()
+    if zf is not None:
+        zf.close()
+
+    if delete:
+        print('Deleting %s' % in_file)
+        os.remove(in_file)
+
     return compounds
 
 
