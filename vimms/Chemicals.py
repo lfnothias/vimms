@@ -176,10 +176,15 @@ class KnownChemical(Chemical):
     """
 
     def __init__(self, formula, isotopes, adducts, rt, max_intensity, chromatogram, children=None,
-                 total_proportion=0.99):
+                 include_adducts_isotopes=True, total_proportion=0.99):
         self.formula = formula
-        self.isotopes = isotopes.get_isotopes(total_proportion)
-        self.adducts = adducts.get_adducts()
+        if include_adducts_isotopes == True:
+            self.isotopes = isotopes.get_isotopes(total_proportion)
+            self.adducts = adducts.get_adducts()
+        else:
+            mz = isotopes.get_isotopes(total_proportion)[0][0]
+            self.isotopes = [(mz, 1, "Mono")]
+            self.adducts = [("M+H", 1)]
         self.rt = rt
         self.max_intensity = max_intensity
         self.chromatogram = chromatogram
@@ -223,17 +228,17 @@ class ChemicalCreator(LoggerMixin):
         self.ROI_sources = ROI_sources
         self.database = database
 
-    def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, use_database=True, alpha=math.inf,
-               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None):
+    def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
+               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True):
         self.mz_range = mz_range
         self.rt_range = rt_range
         self.min_ms1_intensity = min_ms1_intensity
         self.n_ms1_peaks = n_ms1_peaks
         self.ms_levels = ms_levels
-        self.use_database = use_database
         self.alpha = alpha
         self.fixed_mz = fixed_mz
         self.adduct_proportion_cutoff = adduct_proportion_cutoff
+        self.include_adducts_isotopes = include_adducts_isotopes
 
         # set up some counters
         self.crp_samples = [[] for i in range(self.ms_levels)]
@@ -249,12 +254,7 @@ class ChemicalCreator(LoggerMixin):
                                                  self.rt_range[0][0],
                                                  self.rt_range[0][1], self.min_ms1_intensity)
         # Get formulae from database and check there are enough of them
-        if self.use_database == True:
-            if len(self.database) < n_ms1 or self.database is None:
-                self.logger.warning(
-                    'Warning: Not enough compounds in the database. Compounds are not being used. No adducts and isoptopes will be created')
-                self.use_database = False
-            self.formula_list = self._sample_formulae(sampled_peaks)
+        self.formula_list = self._sample_formulae(sampled_peaks)
 
         # Get file split information
         split = self._get_n_ROI_files()
@@ -270,12 +270,9 @@ class ChemicalCreator(LoggerMixin):
                 current_ROI += 1
                 ROIs = self._load_ROI_file(current_ROI, roi_rt_range)
                 ROI_intensities = np.array([r.max_intensity for r in ROIs])
-            if self.use_database == True:
-                formula = self.formula_list[i]
-            else:
-                formula = None
+            formula = self.formula_list[i]
             ROI = ROIs[self._get_ROI_idx(ROI_intensities, sampled_peaks[i].intensity)]
-            chem = self._get_chemical(1, formula, ROI, sampled_peaks[i])
+            chem = self._get_known_ms1(formula, ROI, sampled_peaks[i], self.include_adducts_isotopes)
             if self.fixed_mz == True:
                 chem.mzs = [0 for i in range(
                     len(chem.chromatogram.raw_mzs))]  # not sure how this will work. Not sure why this is set to 0?
@@ -311,7 +308,6 @@ class ChemicalCreator(LoggerMixin):
     def _filter_ROI(self, ROI, roi_rt_range):
         lower = roi_rt_range[0]
         upper = roi_rt_range[1]
-        chem = ROI[0]
         results = [chem for chem in ROI if lower < np.abs(chem.chromatogram.max_rt - chem.chromatogram.min_rt) < upper]
         return results
 
@@ -346,7 +342,7 @@ class ChemicalCreator(LoggerMixin):
                                                                               index_children)
                 self.crp_index[children_ms_level - 1].append(next_crp)
                 if next_crp == max(self.crp_index[children_ms_level - 1]):
-                    kid = self._get_unknown_msn(children_ms_level, None, None, parent)
+                    kid = self._get_unknown_msn(children_ms_level, parent)
                     kid.prop_ms2_mass = kids_intensity_proportions[index_children]
                     if children_ms_level < self.ms_levels:
                         kid.children = self._get_children(children_ms_level, kid)
@@ -360,7 +356,7 @@ class ChemicalCreator(LoggerMixin):
         else:
             # Draws from here if children all independent
             for index_children in range(n_peaks):
-                kid = self._get_unknown_msn(children_ms_level, None, None, parent)
+                kid = self._get_unknown_msn(children_ms_level, parent)
                 kid.prop_ms2_mass = kids_intensity_proportions[index_children]
                 if children_ms_level < self.ms_levels:
                     kid.children = self._get_children(children_ms_level, kid)
@@ -385,14 +381,7 @@ class ChemicalCreator(LoggerMixin):
         else:
             return int(math.floor(self.peak_sampler.density_estimator.n_peaks(2, 1) / (5 ** (ms_level - 2))))
 
-    def _get_chemical(self, ms_level, formula, ROI, sampled_peak):
-        # self._get_chemical(1, formula, ROI, sampled_peaks[i])
-        if formula != None:
-            return self._get_known_ms1(formula, ROI, sampled_peak)
-        else:
-            return self._get_unknown_msn(ms_level, ROI, sampled_peak)
-
-    def _get_known_ms1(self, formula, ROI, sampled_peak):  # fix this
+    def _get_known_ms1(self, formula, ROI, sampled_peak, include_adducts_isotopes):  # fix this
         ## from sampled_peak.rt (XCMS output), we get the point where maximum intensity occurs
         ## so when convering ROI to chemicals, we want to adjust the RT to align it with the point where max intensity occurs
         rt = sampled_peak.rt
@@ -403,26 +392,16 @@ class ChemicalCreator(LoggerMixin):
         formula = Formula(formula)
         isotopes = Isotopes(formula)
         adducts = Adducts(formula, self.adduct_proportion_cutoff)
-        return KnownChemical(formula, isotopes, adducts, adjusted_rt, intensity, ROI.chromatogram, None)
+        return KnownChemical(formula, isotopes, adducts, adjusted_rt, intensity, ROI.chromatogram, None, include_adducts_isotopes)
 
-    def _get_unknown_msn(self, ms_level, ROI, sampled_peak, parent=None):  # fix this
-        if ms_level == 1:
-            mz = sampled_peak.mz
-            ## from sampled_peak.rt (XCMS output), we get the point where maximum intensity occurs
-            ## so when convering ROI to chemicals, we want to adjust the RT to align it with the point where max intensity occurs
-            rt = sampled_peak.rt
-            min2mid_rt_ROI = list(ROI.chromatogram.rts[np.where(ROI.chromatogram.intensities == 1)])[0]
-            adjusted_rt = rt - min2mid_rt_ROI
-            intensity = sampled_peak.intensity
-            return UnknownChemical(mz, adjusted_rt, intensity, ROI.chromatogram, None)
+    def _get_unknown_msn(self, ms_level, parent=None):  # fix this
+        if ms_level == 2:
+            mz = self.peak_sampler.sample(ms_level, 1)[0].mz
         else:
-            if ms_level == 2:
-                mz = self.peak_sampler.sample(ms_level, 1)[0].mz
-            else:
-                mz = self.peak_sampler.sample(2, 1)[0].mz
-            parent_mass_prop = self._get_parent_mass_prop(ms_level)
-            prop_ms2_mass = None
-            return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
+            mz = self.peak_sampler.sample(2, 1)[0].mz
+        parent_mass_prop = self._get_parent_mass_prop(ms_level)
+        prop_ms2_mass = None
+        return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
 
     def _get_parent_mass_prop(self, ms_level):
         return np.random.uniform(0.5, 0.9, 1).tolist()[0]
