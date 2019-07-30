@@ -12,7 +12,7 @@ from vimms.ChineseRestaurantProcess import Restricted_Crp
 from vimms.Common import LoggerMixin, CHEM_DATA, POS_TRANSFORMATIONS, load_obj, takeClosest, save_obj
 
 
-class Compound(object):
+class DatabaseCompound(object):
     def __init__(self, name, chemical_formula, monisotopic_molecular_weight, smiles, inchi, inchikey):
         self.name = name
         self.chemical_formula = chemical_formula

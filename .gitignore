@@ -117,3 +117,5 @@ dmypy.json
 models/*
 .idea/*
 Pipfile.lock
+examples/hmdb_compounds.p
+examples/hmdb_metabolites.zip
