@@ -14,7 +14,7 @@ from tqdm import tqdm
 import zipfile
 
 from vimms.Chemicals import DatabaseCompound
-from vimms.Common import LoggerMixin, MZ, INTENSITY, RT, N_PEAKS, SCAN_DURATION, MZ_INTENSITY_RT
+from vimms.Common import LoggerMixin, MZ, INTENSITY, RT, N_PEAKS, SCAN_DURATION, MZ_INTENSITY_RT, save_obj
 
 
 def download_file(url, out_file=None):
@@ -94,6 +94,52 @@ def extract_hmdb_metabolite(in_file, delete=True):
         os.remove(in_file)
 
     return compounds
+
+
+def get_data_source(mzml_path, filename, xcms_output=None):
+    """
+    Load a `DataSource` object that stores information on a set of .mzML files.
+    :param mzml_path: the location of .mzML files to train the KDEs.
+    :param filename: a particular .mzML file to be used. If None then all files in `mzml_path` will be used.
+    :param xcms_output: As an option, we can use XCMS peak picking results to train the (mz, RT, intensity) densities.
+    This makes the generated spectra more similar to real ones after peak picking. If not available, leave this as None.
+    :return: a DataSource object.
+    """
+    ds = DataSource()
+    ds.load_data(mzml_path, filename)
+    if xcms_output is not None:
+        ds.load_xcms_output(xcms_output)
+    return ds
+
+
+def train_kdes(ds, filename, min_ms1_intensity, min_ms2_intensity, min_rt, max_rt,
+               bandwidth_mz_intensity_rt, bandwidth_n_peaks, out_file=None):
+    """
+    Train KDEs on the .mzML files that have been loaded into the DataSource
+    :param ds: the `DataSource` object that contains loaded .mzML files.
+    :param filename: a particular .mzML file to be used. If None then all loaded files in `ds` will be used.
+    :param min_ms1_intensity: minimum MS1 intensity to include a data point to train the KDEs.
+    :param min_ms2_intensity: minimum MS2 intensity to include a data point to train the KDEs.
+    :param min_rt: minimum RT to include a data point to train the KDEs.
+    :param max_rt: maximum RT to include a data point to train the KDEs.
+    :param bandwidth_mz_intensity_rt: the bandwidth of the kernel to train the KDEs for (mz, RT, intensity) values.
+    :param bandwidth_n_peaks: the bandwidth of the kernel to train the KDEs for the number of peaks per scan.
+    :param out_file: the resulting output file to store the trained KDEs (in form of `PeakSampler` object).
+    :return: a PeakSampler object that can be used to draw samples for simulation.
+    """
+    # train KDEs
+    densities = PeakDensityEstimator(min_ms1_intensity, min_ms2_intensity, min_rt, max_rt, plot=False)
+    densities.kde(ds, filename, 1, bandwidth_mz_intensity_rt, bandwidth_n_peaks)
+    try:
+        densities.kde(ds, filename, 2, bandwidth_mz_intensity_rt, bandwidth_n_peaks)
+    except ValueError: # no MS2 data available
+        pass
+
+    # pass the densities to a peak sampler object and save it
+    ps = PeakSampler(densities)
+    if out_file is not None:
+        save_obj(ps, out_file)
+    return ps
 
 
 class Peak(object):
