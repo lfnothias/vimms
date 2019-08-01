@@ -95,7 +95,7 @@ def run_parallel_experiment(params):
     '''
     Runs experiments in parallel using iParallel library
     :param params: the experimental parameter
-    :return: the analysis name
+    :return: None
     '''
     import ipyparallel as ipp
     rc = ipp.Client()
@@ -108,16 +108,17 @@ def run_parallel_experiment(params):
         print(analysis_name)
 
 
-def run_serial_experiment(param, i, total):
+def run_serial_experiment(params):
     '''
     Runs experiments serially
-    :param param: the experimental parameter
-    :param i: current index
-    :param total: total number of experiments
+    :param params: the experimental parameter
     :return: None
     '''
-    print('Processing \t%d/%d\t%s' % (i + 1, total, param['analysis_name']))
-    run_experiment(param)
+    total = len(params)
+    for i in range(len(params)):
+        param = params[i]
+        print('Processing \t%d/%d\t%s' % (i + 1, total, param['analysis_name']))
+        run_experiment(param)
 
 
 def get_params(experiment_name, Ns, rt_tols, mz_tol, isolation_window, ionisation_mode, data, density,

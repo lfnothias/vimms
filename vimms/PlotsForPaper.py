@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
+import matplotlib.patches as mpatches
+import pymzml
 
 from vimms.Chemicals import UnknownChemical, get_absolute_intensity, get_key
 from vimms.Common import load_obj, PROTON_MASS
@@ -156,6 +158,28 @@ def match(chemical_list_1, chemical_list_2, mz_tol, rt_tol, verbose=False):
     return matches
 
 
+def match_peaklist(mz_list_1, rt_list_1, intensity_list_1, mz_list_2, rt_list_2, intensity_list_2, mz_tol, rt_tol):
+    if mz_tol is not None:  # create mz range for matching in ppm
+        min_mzs = np.array([mz * (1 - mz_tol / 1e6) for mz in mz_list_2])
+        max_mzs = np.array([mz * (1 + mz_tol / 1e6) for mz in mz_list_2])
+
+    else:  # create mz ranges by rounding to 2dp
+        min_mzs = np.around(mz_list_2, decimals=2)
+        max_mzs = np.around(mz_list_2, decimals=2)
+        mz_list_1 = np.around(mz_list_1, decimals=2)
+
+    # create rt ranges for matching
+    min_rts = np.array([rt - rt_tol for rt in rt_list_2])
+    max_rts = np.array([rt + rt_tol for rt in rt_list_2])
+
+    matches = {}
+    for i in range(len(mz_list_1)):  # loop over query and find a match
+        query = (mz_list_1[i], rt_list_1[i], intensity_list_1[i],)
+        match = find_match(query, min_rts, max_rts, min_mzs, max_mzs, mz_list_2, rt_list_2, intensity_list_2)
+        matches[query] = match
+    return matches
+
+
 def check_found_matches(matches, left_label, right_label, N=20):
     found = [key for key in matches if matches[key] is not None]
     print('Found %d/%d (%f)' % (len(found), len(matches), len(found) / len(matches)))
@@ -165,6 +189,131 @@ def check_found_matches(matches, left_label, right_label, N=20):
         if value is not None:
             print('mz %.2f rt %.4f intensity %.4f\tmz %.2f rt %.4f intensity %.4f' % (
                 key[0], key[1], key[2], value[0], value[1], value[2]))
+
+
+def plot_matched_precursors(matches, min_mz, max_mz, min_rt, max_rt, out_file=None):
+    plt.figure(figsize=(12, 6))
+    plt.rcParams.update({'font.size': 24})
+    for key in matches:
+        mz, rt, intensity = key
+        if min_mz < mz < max_mz and min_rt < rt < max_rt:
+            if matches[key] is not None:
+                plt.plot([rt], [mz], marker='.', markersize=5, color='blue', alpha=0.1)
+            else:
+                plt.plot([rt], [mz], marker='.', markersize=5, color='red', alpha=0.1)
+
+    blue_patch = mpatches.Patch(color='blue', label='Matched')
+    red_patch = mpatches.Patch(color='red', label='Unmatched')
+    plt.legend(handles=[blue_patch, red_patch])
+    plt.title('Matched fragmentation events', fontsize=30)
+    plt.xlabel('Retention Time (s)')
+    plt.ylabel('m/z')
+    plt.tight_layout()
+    if out_file is not None:
+        plt.savefig(out_file, dpi=300)
+
+
+def count_stuff(input_file, min_rt, max_rt):
+    run = pymzml.run.Reader(input_file, MS1_Precision=5e-6,
+                            extraAccessions=[('MS:1000016', ['value', 'unitName'])],
+                            obo_version='4.0.1')
+    mzs = []
+    rts = []
+    intensities = []
+    count_ms1_scans = 0
+    count_ms2_scans = 0
+    cumsum_ms1_scans = []
+    cumsum_ms2_scans = []
+    count_selected_precursors = 0
+    for spectrum in run:
+        ms_level = spectrum['ms level']
+        current_scan_rt, units = spectrum.scan_time
+        if units == 'minute':
+            current_scan_rt *= 60.0
+        if min_rt < current_scan_rt < max_rt:
+            if ms_level == 1:
+                count_ms1_scans += 1
+                cumsum_ms1_scans.append((current_scan_rt, count_ms1_scans,))
+            elif ms_level == 2:
+                try:
+                    selected_precursors = spectrum.selected_precursors
+                    count_selected_precursors += len(selected_precursors)
+                    mz = selected_precursors[0]['mz']
+                    intensity = selected_precursors[0]['i']
+
+                    count_ms2_scans += 1
+                    mzs.append(mz)
+                    rts.append(current_scan_rt)
+                    intensities.append(intensity)
+                    cumsum_ms2_scans.append((current_scan_rt, count_ms2_scans,))
+                except KeyError:
+                    # print(selected_precursors)
+                    pass
+
+    print('Number of ms1 scans =', count_ms1_scans)
+    print('Number of ms2 scans =', count_ms2_scans)
+    print('Total scans =', count_ms1_scans + count_ms2_scans)
+    print('Number of selected precursors =', count_selected_precursors)
+    return np.array(mzs), np.array(rts), np.array(intensities), np.array(cumsum_ms1_scans), np.array(cumsum_ms2_scans)
+
+
+def find_match(query, min_rts, max_rts, min_mzs, max_mzs, mz_list, rt_list, intensity_list):
+    # check ranges
+    query_mz, query_rt, query_intensity = query
+    min_rt_check = min_rts <= query_rt
+    max_rt_check = query_rt <= max_rts
+    min_mz_check = min_mzs <= query_mz
+    max_mz_check = query_mz <= max_mzs
+    idx = np.nonzero(min_rt_check & max_rt_check & min_mz_check & max_mz_check)[0]
+
+    # get mz, rt and intensity of matching indices
+    matches_mz = mz_list[idx]
+    matches_rt = rt_list[idx]
+    matches_intensity = intensity_list[idx]
+
+    if len(idx) == 0:  # no match
+        return None
+
+    elif len(idx) == 1:  # single match
+        return (matches_mz[0], matches_rt[0], matches_intensity[0],)
+
+    else:  # multiple matches, take the closest in rt
+        diffs = [np.abs(rt - query_rt) for rt in matches_rt]
+        idx = np.argmin(diffs)
+        return (matches_mz[idx], matches_rt[idx], matches_intensity[idx],)
+
+
+def plot_num_scans(real_cumsum_ms1, real_cumsum_ms2, simulated_cumsum_ms1, simulated_cumsum_ms2, out_file=None):
+    plt.plot(real_cumsum_ms1[:, 0], real_cumsum_ms1[:, 1], 'r')
+    plt.plot(real_cumsum_ms2[:, 0], real_cumsum_ms2[:, 1], 'b')
+    plt.plot(simulated_cumsum_ms1[:, 0], simulated_cumsum_ms1[:, 1], 'r--')
+    plt.plot(simulated_cumsum_ms2[:, 0], simulated_cumsum_ms2[:, 1], 'b--')
+
+    plt.legend(['Actual MS1', 'Actual MS2', 'Simulated MS1', 'Simulated MS2'])
+    plt.xlabel('Retention Time (s)')
+    plt.ylabel('Cumulative sum')
+    plt.title('Cumulative number of MS1 and MS2 scans', fontsize=18)
+    plt.tight_layout()
+
+    if out_file is not None:
+        plt.savefig(out_file, dpi=300)
+
+
+def plot_matched_intensities(matched_intensities, unmatched_intensities, out_file=None):
+    plt.figure()
+    temp1 = plt.hist(np.log(matched_intensities), bins = np.linspace(10,20,50), color='blue')
+    temp2 = plt.hist(np.log(unmatched_intensities), bins = np.linspace(10,20,50), color='red')
+    plt.title('Matched precursor intensities')
+
+    blue_patch = mpatches.Patch(color='blue', label='Matched')
+    red_patch = mpatches.Patch(color='red', label='Unmatched')
+    plt.legend(handles=[blue_patch, red_patch])
+    plt.xlabel('log(intensity)')
+    plt.ylabel('Precursor count')
+    plt.tight_layout()
+
+    if out_file is not None:
+        plt.savefig(out_file, dpi=300)
 
 
 def load_controller(results_dir, experiment_name, N, rt_tol):
@@ -491,7 +640,7 @@ def evaluate_parallel(all_params, pushed_dict=None):
     dview = rc[:]  # use all engines​
     with dview.sync_imports():
         import os
-        from VMSfunctions.Common import load_obj
+        from vimms.Common import load_obj
 
     if pushed_dict is not None:
         dview.push(pushed_dict)
