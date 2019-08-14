@@ -114,8 +114,11 @@ def to_chemical(row):
     return chem
 
 
-def df_to_chemicals(df, filename):
-    filtered_df = df.loc[df['filename'] == filename]
+def df_to_chemicals(df, filename=None):
+    if filename is not None:
+        filtered_df = df.loc[df['filename'] == filename]
+    else:
+        filtered_df = df
     chems = filtered_df.apply(lambda row: to_chemical(row), axis=1).values
     return chems
 
@@ -429,15 +432,15 @@ def compute_performance_scenario_1(controller, dataset, min_ms1_intensity,
 
 def compute_performance_scenario_2(controller, dataset, min_ms1_intensity,
                                    fullscan_filename, fragfile_filename,
-                                   P_peaks_df, Q_peaks_df,
+                                   fullscan_peaks_df, fragmentation_peaks_df,
                                    matching_mz_tol, matching_rt_tol,
                                    chem_to_frag_events=None):
     if chem_to_frag_events is None:  # read MS2 fragmentation events from pickled controller
         chem_to_frag_events = get_frag_events(controller, 2)
 
     # load the list of xcms-picked peaks
-    detected_from_fullscan = df_to_chemicals(P_peaks_df, fullscan_filename)
-    detected_from_fragfile = df_to_chemicals(Q_peaks_df, fragfile_filename)
+    detected_from_fullscan = df_to_chemicals(fullscan_peaks_df, fullscan_filename)
+    detected_from_fragfile = df_to_chemicals(fragmentation_peaks_df, fragfile_filename)
 
     # match with xcms peak-picked ms1 data from fullscan file
     matches_fullscan = match(dataset, detected_from_fullscan, matching_mz_tol, matching_rt_tol, verbose=False)
