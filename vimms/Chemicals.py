@@ -3,6 +3,7 @@ import glob
 import math
 import random
 import re
+from pathlib import Path
 
 import numpy as np
 import scipy
@@ -287,7 +288,7 @@ class ChemicalCreator(LoggerMixin):
     def _get_n_ROI_files(self):
         count = 0
         for i in range(len(self.ROI_sources)):
-            count += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            count += len(list(Path(self.ROI_sources[i]).glob('*.p')))
         split = np.array([int(np.floor(self.n_ms1_peaks / count)) for i in range(count)])
         split[0:int(self.n_ms1_peaks - sum(split))] += 1
         return split
@@ -295,15 +296,16 @@ class ChemicalCreator(LoggerMixin):
     def _load_ROI_file(self, file_index, roi_rt_range=None):
         num_ROI = 0
         for i in range(len(self.ROI_sources)):
-            len_ROI = len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            ROI_files = list(Path(self.ROI_sources[i]).glob('*.p'))
+            len_ROI = len(ROI_files)
             if len_ROI > file_index:
-                ROI_file = glob.glob(self.ROI_sources[i] + '\\*.p')[file_index - num_ROI]
+                ROI_file = ROI_files[file_index - num_ROI]
                 ROI = load_obj(ROI_file)
                 self.logger.debug("Loaded {}".format(ROI_file))
                 if roi_rt_range is not None:
                     ROI = self._filter_ROI(ROI, roi_rt_range)
                 return ROI
-            num_ROI += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            num_ROI += len_ROI
 
     def _filter_ROI(self, ROI, roi_rt_range):
         lower = roi_rt_range[0]
@@ -462,7 +464,7 @@ class MultiSampleCreator(LoggerMixin):
             chemicals_to_keep = np.where((np.array(self.chemical_statuses)[which_class][0]) != "missing")
             new_sample = np.array(new_sample)[chemicals_to_keep].tolist()
             if self.save_location is not None:
-                save_obj(new_sample, self.save_location + '\\sample_%d.p' % index_sample)
+                save_obj(new_sample, Path(self.save_location, 'sample_%d.p' % index_sample))
             self.samples.append(new_sample)
 
     def _get_chemical_statuses(self):
