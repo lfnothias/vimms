@@ -172,8 +172,8 @@ DsDA<-function(
 
         # Use XCMS Centwave algorithm to detect peaks
         
-        xsraw<-xcmsRaw(paste0(gsub("/", "\\\\", getwd()),'\\Data\\', base[do], ".mzML"), includeMSn=TRUE)
-        f<-paste0(gsub("/", "\\\\", getwd()),'\\Data\\', base[do], ".mzML")
+        xsraw<-xcmsRaw(paste0(getwd(),'/Data/', base[do], ".mzML"), includeMSn=TRUE)
+        f<-paste0(getwd(),'/Data/', base[do], ".mzML")
         lg<-0
         xset<-xcmsSet(files=f, nSlaves=1, method="centWave", ppm=mzppm, peakwidth=pw, snthresh=sn, 
                       fitgauss=TRUE, verbose.columns=TRUE, prefilter=prefilter,mzdiff=mzdiff)
