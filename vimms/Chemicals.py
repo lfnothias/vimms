@@ -7,9 +7,11 @@ import re
 import numpy as np
 import scipy
 import scipy.stats
+import copy
 
 from vimms.ChineseRestaurantProcess import Restricted_Crp
 from vimms.Common import LoggerMixin, CHEM_DATA, POS_TRANSFORMATIONS, load_obj, takeClosest, save_obj
+from vimms.Chromatograms import EmpiricalChromatogram
 
 
 class DatabaseCompound(object):
@@ -274,8 +276,10 @@ class ChemicalCreator(LoggerMixin):
             ROI = ROIs[self._get_ROI_idx(ROI_intensities, sampled_peaks[i].intensity)]
             chem = self._get_known_ms1(formula, ROI, sampled_peaks[i], self.include_adducts_isotopes)
             if self.fixed_mz == True:
+                chem.chromatogram.mzs = [0 for i in range(
+                    len(chem.chromatogram.raw_mzs))]
                 chem.mzs = [0 for i in range(
-                    len(chem.chromatogram.raw_mzs))]  # not sure how this will work. Not sure why this is set to 0?
+                    len(chem.chromatogram.raw_mzs))]
             if ms_levels > 1:
                 chem.children = self._get_children(1, chem)
             chem.type = CHEM_DATA
@@ -324,7 +328,15 @@ class ChemicalCreator(LoggerMixin):
         compound_list = np.array(self.database)[sort_index].tolist()
         for formula_index in range(len(sampled_peaks)):
             mz_peak_sample = sampled_peaks[formula_index].mz
-            formula_list.append(compound_list[takeClosest(compound_mass_list, mz_peak_sample)].chemical_formula)
+            list_index = 0
+            compound_found = False
+            while compound_found == False:
+                new_compound = compound_list[
+                    np.argsort(abs(compound_mass_list - mz_peak_sample))[list_index]].chemical_formula
+                if str(new_compound) not in formula_list:
+                    formula_list.append(str(new_compound))
+                    compound_found = True
+                list_index += 1
         return formula_list
 
     def _get_children(self, parent_ms_level, parent, n_peaks=None):  # TODO: this should be moved to the mass spec class
@@ -553,3 +565,19 @@ def get_key(chem):
     :return: a tuple of the three values
     '''
     return (tuple(chem.isotopes), chem.rt, chem.max_intensity)
+
+def RestrictedChemicalCreator(N, ps, prop_ms2_mass=0.7, mz_range = [(0,1000)]):
+    dataset = []
+    chrom = EmpiricalChromatogram(np.array([0,20]),np.array([0,0]),np.array([1,1]))
+    for i in range(N):
+        mz = ps.sample(1, 1, mz_range[0][0], mz_range[0][1])[0].mz
+        chem = UnknownChemical(mz, 0, 1E5, chrom, children=None)
+        n_children = int(ps.density_estimator.n_peaks(2, 1))
+        parent_mass_prop = [1/n_children for k in range(n_children)]
+        children = []
+        for j in range(n_children):
+            mz = ps.sample(2, 1)[0].mz
+            children.append(MSN(mz, 2, prop_ms2_mass, parent_mass_prop[j], None, chem))
+        chem.children = children
+        dataset.append(chem)
+    return dataset
