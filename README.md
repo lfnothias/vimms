@@ -1,5 +1,6 @@
 Virtual Metabolomics Mass Spectrometry (ViMMS)
 ==============================================
+<a href="https://zenodo.org/badge/latestdoi/196360601"><img src="https://zenodo.org/badge/196360601.svg" alt="DOI"></a>
 
 Abstract
 --------
