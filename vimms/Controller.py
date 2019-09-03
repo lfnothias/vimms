@@ -447,3 +447,122 @@ class DsDAController(Controller):
 
     def _update_parameters(self, scan):
         pass
+
+
+class HybridController(Controller):
+    def __init__(self, mass_spec, N, scan_param_changepoints, isolation_window, mz_tol, rt_tol, min_ms1_intensity):
+        super().__init__(mass_spec)
+        self.last_ms1_scan = None
+        self.N = N
+        self.scan_param_changepoints = scan_param_changepoints
+        self.isolation_window = isolation_window  # the isolation window (in Dalton) to select a precursor ion
+        self.mz_tol = mz_tol  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
+        self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again
+        self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
+
+        mass_spec.reset()
+        default_scan = ScanParameters()
+        default_scan.set(ScanParameters.MS_LEVEL, 1)
+        default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
+        mass_spec.set_repeating_scan(default_scan)
+
+        # register new event handlers under this controller
+        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+
+    def run(self, min_time=None, max_time=None, progress_bar=True):
+        if min_time is None and max_time is None:
+            min_time = self.mass_spec.schedule["targetTime"].values[0]
+            max_time = self.mass_spec.schedule["targetTime"].values[-1]
+        if progress_bar:
+            with tqdm(total=max_time - min_time, initial=0) as pbar:
+                self.mass_spec.run(min_time, max_time, pbar=pbar)
+        else:
+            self.mass_spec.run(min_time, max_time)
+
+    def handle_acquisition_open(self):
+        self.logger.info('Time %f Acquisition open' % self.mass_spec.time)
+
+    def handle_acquisition_closing(self):
+        self.logger.info('Time %f Acquisition closing' % self.mass_spec.time)
+
+    def _process_scan(self, scan):
+        self.logger.info('Time %f Received from mass spec %s' % (self.mass_spec.time, scan))
+        if scan.ms_level == 1:  # we get an ms1 scan, if it has a peak, then store it for fragmentation next time
+            if scan.num_peaks > 0:
+                self.last_ms1_scan = scan
+            else:
+                self.last_ms1_scan = None
+
+        elif scan.ms_level == 2:  # if we get ms2 scan, then do something with it
+            # scan.filter_intensity(self.min_ms2_intensity)
+            if scan.num_peaks > 0:
+                self._plot_scan(scan)
+
+    def _update_parameters(self, scan):
+
+        # if there's a previous ms1 scan to process
+        if self.last_ms1_scan is not None:
+
+            mzs = self.last_ms1_scan.mzs
+            intensities = self.last_ms1_scan.intensities
+            rt = self.last_ms1_scan.rt
+
+            # set up current scan parameters
+            current_N = np.array(self.N)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
+            current_isolation_window = np.array(self.isolation_window)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
+            current_rt_tol = np.array(self.rt_tol)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
+            current_mz_tol = np.array(self.mz_tol)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
+
+            # loop over points in decreasing intensity
+            fragmented_count = 0
+            idx = np.argsort(intensities)[::-1]
+            for i in idx:
+                mz = mzs[i]
+                intensity = intensities[i]
+
+                # stopping criteria is after we've fragmented N ions or we found ion < min_intensity
+                if fragmented_count >= current_N:
+                    self.logger.debug('Time %f Top-%d ions have been selected' % (self.mass_spec.time, current_N))
+                    break
+
+                if intensity < self.min_ms1_intensity:
+                    self.logger.debug(
+                        'Time %f Minimum intensity threshold %f reached at %f, %d' % (
+                        self.mass_spec.time, self.min_ms1_intensity, intensity, fragmented_count))
+                    break
+
+                # skip ion in the dynamic exclusion list of the mass spec
+                if self.mass_spec.exclude(mz, rt):
+                    continue
+
+                # send a new ms2 scan parameter to the mass spec
+                dda_scan_params = ScanParameters()
+                dda_scan_params.set(ScanParameters.MS_LEVEL, 2)
+
+                # create precursor object, assume it's all singly charged
+                precursor_charge = +1 if (self.mass_spec.ionisation_mode == POSITIVE) else -1
+                precursor = Precursor(precursor_mz=mz, precursor_intensity=intensity,
+                                      precursor_charge=precursor_charge, precursor_scan_id=self.last_ms1_scan.scan_id)
+                mz_lower = mz - current_isolation_window  # Da
+                mz_upper = mz + current_isolation_window  # Da
+                isolation_windows = [[(mz_lower, mz_upper)]]
+                dda_scan_params.set(ScanParameters.ISOLATION_WINDOWS, isolation_windows)
+                dda_scan_params.set(ScanParameters.PRECURSOR, precursor)
+
+                # save dynamic exclusion parameters too
+                dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL, current_mz_tol)
+                dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, current_rt_tol)
+
+                # push this dda scan parameter to the mass spec queue
+                self.mass_spec.add_to_queue(dda_scan_params)
+                fragmented_count += 1
+
+            for param in self.mass_spec.queue:
+                precursor = param.get(ScanParameters.PRECURSOR)
+                if precursor is not None:
+                    self.logger.debug('- %s' % str(precursor))
+
+                # set this ms1 scan as has been processed
+            self.last_ms1_scan = None
