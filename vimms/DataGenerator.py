@@ -566,11 +566,18 @@ class PeakSampler(LoggerMixin):
         pass
         # returns list of ms2 fragments. type = list of MSN
 
-    def noise_sample(self):
+    def get_noise_sample(self):
         # need to choose number of noise fragments
         # then draw n noise fragments
         # returns list of ms2 noise fragments. type = MSN
         return []
+
+    def get_msn_noisy_intensity(self, intensity, ms_level):
+        # takes intensity
+        # adds noise, but ensures its positive value
+        # returns list with one numeric value
+        # ignores ms_level for now
+        pass
 
     def get_parent_intensity_proportion(self):
         # returns number between 0 and 1
