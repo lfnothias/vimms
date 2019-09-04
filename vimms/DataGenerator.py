@@ -544,16 +544,17 @@ class PeakDensityEstimator(LoggerMixin):
 class PeakSampler(LoggerMixin):
     """A class to sample peaks from a trained density estimator"""
 
+    # TODO: add min intensity threshold here so we don't store everything??!!!
     def __init__(self, density_estimator):
         self.density_estimator = density_estimator
 
-    def sample(self, ms_level, n_peaks=None, min_mz=None, max_mz=None, min_rt=None, max_rt=None, min_intensity=None):
+    def get_peak(self, ms_level, n_peaks=None, min_mz=None, max_mz=None, min_rt=None, max_rt=None, min_intensity=None):
         if n_peaks is None:
             n_peaks = max(self.density_estimator.n_peaks(ms_level, 1).astype(int)[0][0], 0)
 
         peaks = []
         while len(peaks) < n_peaks:
-            vals = self.density_estimator.sample(ms_level, 1)
+            vals = self.density_estimator.get_peak(ms_level, 1)
             intensity = np.exp(vals[0, 1])
             mz = vals[0, 0]
             rt = vals[0, 2]
@@ -562,14 +563,15 @@ class PeakSampler(LoggerMixin):
                 peaks.append(p)
         return peaks
 
-    def get_spectra(self):
-        pass
+    def get_ms2_spectra(self):
+        return []
         # returns list of ms2 fragments. type = list of MSN
 
     def get_noise_sample(self):
         # need to choose number of noise fragments
         # then draw n noise fragments
         # returns list of ms2 noise fragments. type = MSN
+        # noise fragment here is defined as ms2 peaks below some intensity threshold
         return []
 
     def get_msn_noisy_intensity(self, intensity, ms_level):
@@ -577,11 +579,21 @@ class PeakSampler(LoggerMixin):
         # adds noise, but ensures its positive value
         # returns list with one numeric value
         # ignores ms_level for now
-        pass
+        # TODO: until we characterise the noise properly, just return the original value for now
+        return [intensity]
+
+    def get_msn_noisy_mz(self, mz, ms_level):
+        # same as above, but for m/z
+        # Simon: We can characterise mz noise from the chromatographic peaks we extract.
+        # I suggest a constant variance for now, but we might want to fit models where we account for
+        # variability in noise variance as a function of mz itself, and intensity.
+        return [mz]
 
     def get_parent_intensity_proportion(self):
+        # this is the proportion of all fragment intensities in a spectra over the parent intensity
+        # TODO: for each fragmentation spectra, we need to work out the parent precursor peak first
         # returns number between 0 and 1
-        pass
+        return 1.0
 
     def _is_valid(self, peak, min_mz, max_mz, min_rt, max_rt, min_intensity):
         if peak.intensity < 0:

@@ -257,9 +257,9 @@ class ChemicalCreator(LoggerMixin):
             print("Warning ms_level > 3 not implemented properly yet. Uses scaled ms_level = 2 information for now")
         n_ms1 = self._get_n(1)
         self.logger.debug("{} ms1 peaks to be created.".format(n_ms1))
-        sampled_peaks = self.peak_sampler.sample(1, n_ms1, self.mz_range[0][0], self.mz_range[0][1],
-                                                 self.rt_range[0][0],
-                                                 self.rt_range[0][1], self.min_ms1_intensity)
+        sampled_peaks = self.peak_sampler.get_peak(1, n_ms1, self.mz_range[0][0], self.mz_range[0][1],
+                                                   self.rt_range[0][0],
+                                                   self.rt_range[0][1], self.min_ms1_intensity)
         # Get formulae from database and check there are enough of them
         self.formula_list = self._sample_formulae(sampled_peaks)
 
@@ -383,8 +383,7 @@ class ChemicalCreator(LoggerMixin):
                     self.crp_samples[children_ms_level - 1].append(kid)
                 else:
                     kid = copy.deepcopy(self.crp_samples[children_ms_level - 1][next_crp])
-                    kid.parent_mass_prop = 0.8  # self.peak_sampler.get_parent_intensity_proportion()
-                    # TODO: un-hash above code when working
+                    kid.parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
                     kid.parent = parent
                 kids.append(kid)
             self.crp_samples[children_ms_level - 1].extend(kids)
@@ -400,9 +399,9 @@ class ChemicalCreator(LoggerMixin):
 
     def _get_msn_proportions(self, children_ms_level, n_peaks):
         if children_ms_level == 2:
-            kids_intensities = self.peak_sampler.sample(children_ms_level, n_peaks)
+            kids_intensities = self.peak_sampler.get_peak(children_ms_level, n_peaks)
         else:
-            kids_intensities = self.peak_sampler.sample(2, n_peaks)
+            kids_intensities = self.peak_sampler.get_peak(2, n_peaks)
         kids_intensities_total = sum([x.intensity for x in kids_intensities])
         kids_intensities_proportion = [x.intensity / kids_intensities_total for x in kids_intensities]
         return kids_intensities_proportion
@@ -429,11 +428,11 @@ class ChemicalCreator(LoggerMixin):
 
     def _get_unknown_msn(self, ms_level, parent=None):  # fix this
         if ms_level == 2:
-            mz = self.peak_sampler.sample(ms_level, 1)[0].mz
+            mz = self.peak_sampler.get_peak(ms_level, 1)[0].mz
         else:
-            mz = self.peak_sampler.sample(2, 1)[0].mz
-        parent_mass_prop = 0.8  # self.peak_sampler.get_parent_intensity_proportion()
-        # TODO: un-hash above code when working
+            mz = self.peak_sampler.get_peak(2, 1)[0].mz
+            parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
+            # TODO: un-hash above code when working
         prop_ms2_mass = None
         return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
 
@@ -588,13 +587,13 @@ def RestrictedChemicalCreator(N, ps, prop_ms2_mass=0.7, mz_range = [(0,1000)]):
     dataset = []
     chrom = EmpiricalChromatogram(np.array([0,20]),np.array([0,0]),np.array([1,1]))
     for i in range(N):
-        mz = ps.sample(1, 1, mz_range[0][0], mz_range[0][1])[0].mz
+        mz = ps.get_peak(1, 1, mz_range[0][0], mz_range[0][1])[0].mz
         chem = UnknownChemical(mz, 0, 1E5, chrom, children=None)
         n_children = int(ps.density_estimator.n_peaks(2, 1))
         parent_mass_prop = [1/n_children for k in range(n_children)]
         children = []
         for j in range(n_children):
-            mz = ps.sample(2, 1)[0].mz
+            mz = ps.get_peak(2, 1)[0].mz
             children.append(MSN(mz, 2, prop_ms2_mass, parent_mass_prop[j], None, chem))
         chem.children = children
         dataset.append(chem)
