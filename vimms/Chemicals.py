@@ -234,7 +234,8 @@ class ChemicalCreator(LoggerMixin):
         self.database = database
 
     def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
-               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True):
+               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True,
+               get_children_method="spectra"):
         self.mz_range = mz_range
         self.rt_range = rt_range
         self.min_ms1_intensity = min_ms1_intensity
@@ -244,6 +245,7 @@ class ChemicalCreator(LoggerMixin):
         self.fixed_mz = fixed_mz
         self.adduct_proportion_cutoff = adduct_proportion_cutoff
         self.include_adducts_isotopes = include_adducts_isotopes
+        self.get_children_method = get_children_method
 
         # set up some counters
         self.crp_samples = [[] for i in range(self.ms_levels)]
@@ -278,13 +280,13 @@ class ChemicalCreator(LoggerMixin):
             formula = self.formula_list[i]
             ROI = ROIs[self._get_ROI_idx(ROI_intensities, sampled_peaks[i].intensity)]
             chem = self._get_known_ms1(formula, ROI, sampled_peaks[i], self.include_adducts_isotopes)
-            if self.fixed_mz == True:
+            if self.fixed_mz:
                 chem.chromatogram.mzs = [0 for i in range(
                     len(chem.chromatogram.raw_mzs))]
                 chem.mzs = [0 for i in range(
                     len(chem.chromatogram.raw_mzs))]
             if ms_levels > 1:
-                chem.children = self._get_children(1, chem)
+                chem.children = self._get_children(self.get_children_method, chem)
             chem.type = CHEM_DATA
             chemicals.append(chem)
             if i % 100 == 0:
@@ -334,7 +336,7 @@ class ChemicalCreator(LoggerMixin):
             mz_peak_sample = sampled_peaks[formula_index].mz
             list_index = 0
             compound_found = False
-            while compound_found == False:
+            while compound_found is False:
                 new_compound = compound_list[
                     np.argsort(abs(compound_mass_list - mz_peak_sample))[list_index]].chemical_formula
                 if str(new_compound) not in formula_list:
@@ -343,8 +345,24 @@ class ChemicalCreator(LoggerMixin):
                 list_index += 1
         return formula_list
 
-    def _get_children(self, parent_ms_level, parent, n_peaks=None):  # TODO: this should be moved to the mass spec class
-        children_ms_level = parent_ms_level + 1
+    def _get_children(self, get_children_method, parent, n_peaks=None):
+        if get_children_method == "spectra":
+            kids = self._get_children_spectra()
+            return kids
+        elif get_children_method == "sample":
+            kids = self._get_children_sample(parent, n_peaks)
+            return kids
+        # TODO: add ability to get children through prediction from parent formula
+        # will need to add a default if MS2+ is requested
+        else:
+            raise ValueError("'get_children_method' must be either 'spectra' or 'sample'")
+
+    def _get_children_spectra(self):
+        kids = self.peak_sampler.get_spectra()
+        return kids
+
+    def _get_children_sample(self, parent, n_peaks=None):
+        children_ms_level = parent.ms_level + 1
         if n_peaks is None:
             n_peaks = self._get_n(children_ms_level)
         kids = []
@@ -361,11 +379,12 @@ class ChemicalCreator(LoggerMixin):
                     kid = self._get_unknown_msn(children_ms_level, parent)
                     kid.prop_ms2_mass = kids_intensity_proportions[index_children]
                     if children_ms_level < self.ms_levels:
-                        kid.children = self._get_children(children_ms_level, kid)
+                        kid.children = self._get_children(self.get_children_method, kid)
                     self.crp_samples[children_ms_level - 1].append(kid)
                 else:
                     kid = copy.deepcopy(self.crp_samples[children_ms_level - 1][next_crp])
-                    kid.parent_mass_prop = self._get_parent_mass_prop(children_ms_level)
+                    kid.parent_mass_prop = 0.8  # self.peak_sampler.get_parent_intensity_proportion()
+                    # TODO: un-hash above code when working
                     kid.parent = parent
                 kids.append(kid)
             self.crp_samples[children_ms_level - 1].extend(kids)
@@ -375,7 +394,7 @@ class ChemicalCreator(LoggerMixin):
                 kid = self._get_unknown_msn(children_ms_level, parent)
                 kid.prop_ms2_mass = kids_intensity_proportions[index_children]
                 if children_ms_level < self.ms_levels:
-                    kid.children = self._get_children(children_ms_level, kid)
+                    kid.children = self._get_children(self.get_children_method, kid)
                 kids.append(kid)
         return kids
 
@@ -391,7 +410,6 @@ class ChemicalCreator(LoggerMixin):
     def _get_n(self, ms_level):
         if ms_level == 1:
             return int(self.n_ms1_peaks)
-            # TODO: give the option to sample this from a density
         elif ms_level == 2:
             return int(self.peak_sampler.density_estimator.n_peaks(2, 1))
         else:
@@ -403,7 +421,6 @@ class ChemicalCreator(LoggerMixin):
         rt = sampled_peak.rt
         min2mid_rt_ROI = list(ROI.chromatogram.rts[np.where(ROI.chromatogram.intensities == 1)])[0]
         adjusted_rt = rt - min2mid_rt_ROI
-
         intensity = sampled_peak.intensity
         formula = Formula(formula)
         isotopes = Isotopes(formula)
@@ -415,20 +432,17 @@ class ChemicalCreator(LoggerMixin):
             mz = self.peak_sampler.sample(ms_level, 1)[0].mz
         else:
             mz = self.peak_sampler.sample(2, 1)[0].mz
-        parent_mass_prop = self._get_parent_mass_prop(ms_level)
+        parent_mass_prop = 0.8  # self.peak_sampler.get_parent_intensity_proportion()
+        # TODO: un-hash above code when working
         prop_ms2_mass = None
         return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
-
-    def _get_parent_mass_prop(self, ms_level):
-        return np.random.uniform(0.5, 0.9, 1).tolist()[0]
-        # TODO: this needs to come from a density
 
     def _valid_ms1_chem(self, chem):
         if chem.max_intensity < self.min_ms1_intensity:
             return False
-        elif chem.rt < self.min_rt:
+        elif chem.rt < self.rt_range[0][0]:
             return False
-        elif chem.rt > self.max_rt:
+        elif chem.rt > self.rt_range[0][1]:
             return False
         return True
 

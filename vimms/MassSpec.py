@@ -115,12 +115,10 @@ ExclusionItem = namedtuple('ExclusionItem', 'from_mz to_mz from_rt to_rt')
 # Independent here refers to how the intensity of each peak in a scan is independent of each other
 # i.e. there's no ion supression effect
 class IndependentMassSpectrometer(MassSpectrometer):
-    def __init__(self, ionisation_mode, chemicals, density=None, schedule_file=None, noise_density=None, intensity_noise=0):
-        # TODO: add noise density and intensity_noise to peak sampler
+    def __init__(self, ionisation_mode, chemicals, density=None, schedule_file=None, peak_sampler=None):
         super().__init__(ionisation_mode)
         self.chemicals = chemicals
-        self.noise_density = noise_density
-        self.intensity_noise = intensity_noise
+        self.peak_sampler = peak_sampler
         self.idx = 0
         self.time = 0
         self.queue = []
@@ -314,11 +312,11 @@ class IndependentMassSpectrometer(MassSpectrometer):
 
     def _get_all_mz_peaks_noisy(self, chemical, query_rt, ms_level, isolation_windows):
         mz_peaks = self._get_all_mz_peaks(chemical, query_rt, ms_level, isolation_windows)
-        if mz_peaks is None:
+        if self.peak_sampler is None:
             return mz_peaks
-        noisy_mz_peaks = [(mz_peaks[i][0], mz_peaks[i][1] + np.random.normal(0,self.intensity_noise,1)[0]) for i in range(len(mz_peaks))]
-        if self.noise_density is not None:
-            noisy_mz_peaks += self.noise_density._get_noise(ms_level=2)
+        if mz_peaks is not None:
+            noisy_mz_peaks = [(mz_peaks[i][0], self.peak_sampler.get_msn_noisy_intensity(mz_peaks[i][1], ms_level)) for i in range(len(mz_peaks))]
+        noisy_mz_peaks += self.peak_sampler.get_noise_sample()
         return noisy_mz_peaks
 
     def _get_all_mz_peaks(self, chemical, query_rt, ms_level, isolation_windows):
