@@ -75,7 +75,7 @@ class Isotopes(object):
         self.formula = formula
         self.C12_proportion = 0.989
         self.mz_diff = 1.0033548378
-        # TODO: Add fucntionality for elements other than Carbon
+        # TODO: Add functionality for elements other than Carbon
 
     def get_isotopes(self, total_proportion):
         peaks = [() for i in range(len(self._get_isotope_proportions(total_proportion)))]
@@ -159,6 +159,7 @@ class UnknownChemical(Chemical):
         self.chromatogram = chromatogram
         self.children = children
         self.ms_level = 1
+        self.mz_diff = 0
 
     def __repr__(self):
         return 'UnknownChemical mz=%.4f rt=%.2f max_intensity=%.2f' % (
@@ -181,6 +182,7 @@ class KnownChemical(Chemical):
     def __init__(self, formula, isotopes, adducts, rt, max_intensity, chromatogram, children=None,
                  include_adducts_isotopes=True, total_proportion=0.99):
         self.formula = formula
+        self.mz_diff = isotopes.mz_diff
         if include_adducts_isotopes == True:
             self.isotopes = isotopes.get_isotopes(total_proportion)
             self.adducts = adducts.get_adducts()

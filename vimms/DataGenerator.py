@@ -562,6 +562,20 @@ class PeakSampler(LoggerMixin):
                 peaks.append(p)
         return peaks
 
+    def get_spectra(self):
+        pass
+        # returns list of ms2 fragments. type = list of MSN
+
+    def noise_sample(self):
+        # need to choose number of noise fragments
+        # then draw n noise fragments
+        # returns list of ms2 noise fragments. type = MSN
+        return []
+
+    def get_parent_intensity_proportion(self):
+        # returns number between 0 and 1
+        pass
+
     def _is_valid(self, peak, min_mz, max_mz, min_rt, max_rt, min_intensity):
         if peak.intensity < 0:
             return False

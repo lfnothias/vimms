@@ -115,9 +115,12 @@ ExclusionItem = namedtuple('ExclusionItem', 'from_mz to_mz from_rt to_rt')
 # Independent here refers to how the intensity of each peak in a scan is independent of each other
 # i.e. there's no ion supression effect
 class IndependentMassSpectrometer(MassSpectrometer):
-    def __init__(self, ionisation_mode, chemicals, density=None, schedule_file=None):
+    def __init__(self, ionisation_mode, chemicals, density=None, schedule_file=None, noise_density=None, intensity_noise=0):
+        # TODO: add noise density and intensity_noise to peak sampler
         super().__init__(ionisation_mode)
         self.chemicals = chemicals
+        self.noise_density = noise_density
+        self.intensity_noise = intensity_noise
         self.idx = 0
         self.time = 0
         self.queue = []
@@ -275,7 +278,7 @@ class IndependentMassSpectrometer(MassSpectrometer):
             chemical = self.chemicals[i]
 
             # mzs is a list of (mz, intensity) for the different adduct/isotopes combinations of a chemical            
-            mzs = self._get_all_mz_peaks(chemical, scan_time, ms_level, isolation_windows)
+            mzs = self._get_all_mz_peaks_noisy(chemical, scan_time, ms_level, isolation_windows)
             peaks = []
             if mzs is not None:
                 chem_mzs = []
@@ -309,6 +312,15 @@ class IndependentMassSpectrometer(MassSpectrometer):
         idx = np.nonzero(rtmin_check & rtmax_check)[0]
         return idx
 
+    def _get_all_mz_peaks_noisy(self, chemical, query_rt, ms_level, isolation_windows):
+        mz_peaks = self._get_all_mz_peaks(chemical, query_rt, ms_level, isolation_windows)
+        if mz_peaks is None:
+            return mz_peaks
+        noisy_mz_peaks = [(mz_peaks[i][0], mz_peaks[i][1] + np.random.normal(0,self.intensity_noise,1)[0]) for i in range(len(mz_peaks))]
+        if self.noise_density is not None:
+            noisy_mz_peaks += self.noise_density._get_noise(ms_level=2)
+        return noisy_mz_peaks
+
     def _get_all_mz_peaks(self, chemical, query_rt, ms_level, isolation_windows):
         if not self._rt_match(chemical, query_rt):
             return None
@@ -335,14 +347,11 @@ class IndependentMassSpectrometer(MassSpectrometer):
                     intensity = self._get_intensity(chemical, query_rt, which_isotope, which_adduct)
                     mz = self._get_mz(chemical, query_rt, which_isotope, which_adduct)
                     mz_peaks.extend([(mz, intensity)])
-        elif ms_level > 1 and which_isotope > 0:
-            pass  # TODO: we need to deal with msN fragmentation of non-monoisotopic peaks?
-            # does not return any ms2+ fragments if not monoisotopic
         elif ms_level == chemical.ms_level:
             # returns ms2 fragments if chemical and scan are both ms2, 
             # returns ms3 fragments if chemical and scan are both ms3, etc, etc
             intensity = self._get_intensity(chemical, query_rt, which_isotope, which_adduct)
-            mz = self._get_mz(chemical, query_rt, which_isotope, which_adduct)
+            mz = self._get_mz(chemical, query_rt, which_isotope, which_adduct) + which_isotope * chemical.mz_diff
             return [(mz, intensity)]
         else:
             # check isolation window for ms2+ scans, queries children if isolation windows ok
