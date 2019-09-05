@@ -554,7 +554,7 @@ class PeakSampler(LoggerMixin):
 
         peaks = []
         while len(peaks) < n_peaks:
-            vals = self.density_estimator.get_peak(ms_level, 1)
+            vals = self.density_estimator.sample(ms_level, 1)
             intensity = np.exp(vals[0, 1])
             mz = vals[0, 0]
             rt = vals[0, 2]
