@@ -349,8 +349,9 @@ class IndependentMassSpectrometer(MassSpectrometer):
             # returns ms2 fragments if chemical and scan are both ms2, 
             # returns ms3 fragments if chemical and scan are both ms3, etc, etc
             intensity = self._get_intensity(chemical, query_rt, which_isotope, which_adduct)
-            mz = self._get_mz(chemical, query_rt, which_isotope, which_adduct) + which_isotope * chemical.mz_diff
+            mz = self._get_mz(chemical, query_rt, which_isotope, which_adduct)
             return [(mz, intensity)]
+            # TODO: Potential improve how the isotope spectra are generated
         else:
             # check isolation window for ms2+ scans, queries children if isolation windows ok
             if self._isolation_match(chemical, query_rt, isolation_windows[chemical.ms_level - 1], which_isotope,
