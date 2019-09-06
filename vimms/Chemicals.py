@@ -410,9 +410,9 @@ class ChemicalCreator(LoggerMixin):
         if ms_level == 1:
             return int(self.n_ms1_peaks)
         elif ms_level == 2:
-            return int(self.peak_sampler.density_estimator.n_peaks(2, 1))
+            return int(self.peak_sampler.n_peaks(2, 1))
         else:
-            return int(math.floor(self.peak_sampler.density_estimator.n_peaks(2, 1) / (5 ** (ms_level - 2))))
+            return int(math.floor(self.peak_sampler.n_peaks(2, 1) / (5 ** (ms_level - 2))))
 
     def _get_known_ms1(self, formula, ROI, sampled_peak, include_adducts_isotopes):  # fix this
         ## from sampled_peak.rt (XCMS output), we get the point where maximum intensity occurs
@@ -589,7 +589,7 @@ def RestrictedChemicalCreator(N, ps, prop_ms2_mass=0.7, mz_range = [(0,1000)]):
     for i in range(N):
         mz = ps.get_peak(1, 1, mz_range[0][0], mz_range[0][1])[0].mz
         chem = UnknownChemical(mz, 0, 1E5, chrom, children=None)
-        n_children = int(ps.density_estimator.n_peaks(2, 1))
+        n_children = int(ps.n_peaks(2, 1))
         parent_mass_prop = [1/n_children for k in range(n_children)]
         children = []
         for j in range(n_children):

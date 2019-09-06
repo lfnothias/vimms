@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 from collections import namedtuple
 
@@ -6,11 +7,34 @@ import pandas as pd
 from events import Events
 
 from vimms.Common import LoggerMixin, adduct_transformation
-from vimms.DataGenerator import Peak
 
+
+class Peak(object):
+    """
+    A simple class to represent an empirical or sampled scan-level peak object
+    """
+
+    def __init__(self, mz, rt, intensity, ms_level):
+        self.mz = mz
+        self.rt = rt
+        self.intensity = intensity
+        self.ms_level = ms_level
+
+    def __repr__(self):
+        return 'Peak mz=%.4f rt=%.2f intensity=%.2f ms_level=%d' % (self.mz, self.rt, self.intensity, self.ms_level)
+
+    def __eq__(self, other):
+        if not isinstance(other, Peak):
+            # don't attempt to compare against unrelated types
+            return NotImplemented
+
+        return math.isclose(self.mz, other.mz) and \
+               math.isclose(self.rt, other.rt) and \
+               math.isclose(self.intensity, other.intensity) and \
+               self.ms_level == other.ms_level
 
 class Scan(object):
-    def __init__(self, scan_id, mzs, intensities, ms_level, rt, scan_duration=None, isolation_windows=None):
+    def __init__(self, scan_id, mzs, intensities, ms_level, rt, scan_duration=None, isolation_windows=None, parent=None):
         assert len(mzs) == len(intensities)
         self.scan_id = scan_id
 
@@ -25,6 +49,7 @@ class Scan(object):
 
         self.scan_duration = scan_duration
         self.isolation_windows = isolation_windows
+        self.parent = parent
 
     def __repr__(self):
         return 'Scan %d num_peaks=%d rt=%.2f ms_level=%d' % (self.scan_id, self.num_peaks, self.rt, self.ms_level)
@@ -115,7 +140,7 @@ ExclusionItem = namedtuple('ExclusionItem', 'from_mz to_mz from_rt to_rt')
 # Independent here refers to how the intensity of each peak in a scan is independent of each other
 # i.e. there's no ion supression effect
 class IndependentMassSpectrometer(MassSpectrometer):
-    def __init__(self, ionisation_mode, chemicals, density=None, schedule_file=None, peak_sampler=None):
+    def __init__(self, ionisation_mode, chemicals, peak_sampler, schedule_file=None):
         super().__init__(ionisation_mode)
         self.chemicals = chemicals
         self.peak_sampler = peak_sampler
@@ -124,7 +149,6 @@ class IndependentMassSpectrometer(MassSpectrometer):
         self.queue = []
         self.repeating_scan_parameters = None
         self.precursor_information = defaultdict(list)  # key: Precursor object, value: ms2 scans
-        self.density = density  # a PeakDensityEstimator object
         self.schedule_file = schedule_file
         if self.schedule_file is not None:
             self.schedule = pd.read_csv(schedule_file)
@@ -220,7 +244,7 @@ class IndependentMassSpectrometer(MassSpectrometer):
             except IndexError:  # if queue is empty, the next one is an MS1 scan by default
                 next_level = 1
             current_level = scan.ms_level
-            current_scan_duration = self.density.scan_durations(current_level, next_level, 1).flatten()[0]
+            current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1).flatten()[0]
             scan.scan_duration = current_scan_duration
 
             # increase simulator scan index and time

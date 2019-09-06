@@ -9,8 +9,10 @@ import matplotlib.patches as mpatches
 import pymzml
 
 from vimms.Chemicals import UnknownChemical, get_absolute_intensity, get_key
-from vimms.Common import load_obj, PROTON_MASS
-from vimms.TopNExperiment import get_chemicals, get_precursor_info, get_chem_to_frag_events
+from vimms.Common import load_obj, PROTON_MASS, find_nearest_index_in_array
+from vimms.MassSpec import FragmentationEvent
+from vimms.Roi import make_roi, RoiToChemicalCreator
+from vimms.SpectralUtils import get_precursor_info, get_chemicals
 
 
 def get_N(row):
@@ -625,6 +627,69 @@ def calculate_performance(params):
                                                                    chem_to_frag_events=chem_to_frag_events)
 
     return N, rt_tol, scenario, tp, fp, fn, prec, rec, f1
+
+
+def get_chem_to_frag_events(chemicals, ms1_df):
+    # used for searching later
+    min_rts = np.array([min(chem.chromatogram.raw_rts) for chem in chemicals])
+    max_rts = np.array([max(chem.chromatogram.raw_rts) for chem in chemicals])
+    min_mzs = np.array([min(chem.chromatogram.raw_mzs) for chem in chemicals])
+    max_mzs = np.array([max(chem.chromatogram.raw_mzs) for chem in chemicals])
+
+    # loop over each fragmentation event in ms1_df, attempt to match it to chemicals
+    chem_to_frag_events = defaultdict(list)
+    for idx, row in ms1_df.iterrows():
+        query_rt = row['ms1_scan_rt']
+        query_mz = row['ms1_mz']
+        query_intensity = row['ms1_intensity']
+        scan_id = row['ms2_scan_id']
+
+        chem = None
+        idx = _get_chem_indices(query_mz, query_rt, min_mzs, max_mzs, min_rts, max_rts)
+        if len(idx) == 1:  # single match
+            chem = chemicals[idx][0]
+
+        elif len(
+                idx) > 1:  # multiple matches, find the closest in intensity to query_intensity at the time of fragmentation
+            matches = chemicals[idx]
+            possible_intensities = np.array([get_absolute_intensity(chem, query_rt) for chem in matches])
+            closest = find_nearest_index_in_array(possible_intensities, query_intensity)
+            chem = matches[closest]
+
+        # create frag event for the given chem
+        if chem is not None:
+            ms_level = 2
+            peaks = []  # we don't know which ms2 peaks are linked to this chem object
+            # key = get_key(chem)
+            frag_event = FragmentationEvent(chem, query_rt, ms_level, peaks, scan_id)
+            chem_to_frag_events[chem].append(frag_event)
+    return dict(chem_to_frag_events)
+
+
+def get_chemicals(mzML_file, mz_tol, min_ms1_intensity, start_rt, stop_rt, min_length=1):
+    '''
+    Extract ROI from an mzML file and turn them into UnknownChemical objects
+    :param mzML_file: input mzML file
+    :param mz_tol: mz tolerance for ROI extraction
+    :param min_ms1_intensity: ROI will only be kept if it has one point above this threshold
+    :param start_rt: start RT to extract ROI
+    :param stop_rt: end RT to extract ROI
+    :return: a list of UnknownChemical objects
+    '''
+    min_intensity = 0
+    good_roi, junk = make_roi(mzML_file, mz_tol=mz_tol, mz_units='ppm', min_length=min_length,
+                              min_intensity=min_intensity, start_rt=start_rt, stop_rt=stop_rt)
+
+    # keep ROI that have at least one point above the minimum to fragment threshold
+    keep = []
+    for roi in good_roi:
+        if np.count_nonzero(np.array(roi.intensity_list) > min_ms1_intensity) > 0:
+            keep.append(roi)
+
+    ps = None  # unused
+    rtcc = RoiToChemicalCreator(ps, keep)
+    chemicals = np.array(rtcc.chemicals)
+    return chemicals
 
 
 def evaluate_serial(all_params):

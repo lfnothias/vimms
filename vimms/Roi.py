@@ -276,7 +276,6 @@ class RoiToChemicalCreator(ChemicalCreator):
                 if self.peak_sampler is not None:
                     try:
                         # TODO: initialise chemical with only 1 child for the purpose of experiment, we might need to improve this
-                        # TODO: move all the children setting stuff to mass spec?
                         chem.children = self._get_children(1, chem, n_peaks=1)
                     except KeyError:
                         pass
