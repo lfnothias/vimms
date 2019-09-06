@@ -2,7 +2,7 @@ import os
 
 from vimms.Common import save_obj, create_if_not_exist
 from vimms.Controller import TopNController
-from vimms.DataGenerator import DataSource, PeakDensityEstimator, PeakSampler
+from vimms.DataGenerator import DataSource, PeakSampler
 from vimms.MassSpec import IndependentMassSpectrometer
 
 
@@ -27,8 +27,8 @@ def run_experiment(param):
         print('Skipping %s' % (analysis_name))
     else:
         print('Processing %s' % (analysis_name))
-        density = param['density']
-        if density is None:  # extract density from the fragmenatation file
+        peak_sampler = param['peak_sampler']
+        if peak_sampler is None:  # extract density from the fragmenatation file
             mzml_path = param['mzml_path']
             fragfiles = param['fragfiles']
             fragfile = fragfiles[(N, rt_tol,)]

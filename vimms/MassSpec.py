@@ -140,7 +140,7 @@ ExclusionItem = namedtuple('ExclusionItem', 'from_mz to_mz from_rt to_rt')
 # Independent here refers to how the intensity of each peak in a scan is independent of each other
 # i.e. there's no ion supression effect
 class IndependentMassSpectrometer(MassSpectrometer):
-    def __init__(self, ionisation_mode, chemicals, peak_sampler, schedule_file=None):
+    def __init__(self, ionisation_mode, chemicals, peak_sampler, schedule_file=None, add_noise=False):
         super().__init__(ionisation_mode)
         self.chemicals = chemicals
         self.peak_sampler = peak_sampler
@@ -152,6 +152,8 @@ class IndependentMassSpectrometer(MassSpectrometer):
         self.schedule_file = schedule_file
         if self.schedule_file is not None:
             self.schedule = pd.read_csv(schedule_file)
+        self.add_noise = add_noise # whether to add noise to the generated fragment peaks
+
         self.fragmentation_events = []  # which chemicals produce which peaks
         self.previous_level = None  # ms_level of the previous scan
 
@@ -299,8 +301,12 @@ class IndependentMassSpectrometer(MassSpectrometer):
         for i in idx:
             chemical = self.chemicals[i]
 
-            # mzs is a list of (mz, intensity) for the different adduct/isotopes combinations of a chemical            
-            mzs = self._get_all_mz_peaks_noisy(chemical, scan_time, ms_level, isolation_windows)
+            # mzs is a list of (mz, intensity) for the different adduct/isotopes combinations of a chemical
+            if self.add_noise:
+                mzs = self._get_all_mz_peaks_noisy(chemical, scan_time, ms_level, isolation_windows)
+            else:
+                mzs = self._get_all_mz_peaks(chemical, scan_time, ms_level, isolation_windows)
+
             peaks = []
             if mzs is not None:
                 chem_mzs = []
@@ -340,6 +346,8 @@ class IndependentMassSpectrometer(MassSpectrometer):
             return mz_peaks
         if mz_peaks is not None:
             noisy_mz_peaks = [(mz_peaks[i][0], self.peak_sampler.get_msn_noisy_intensity(mz_peaks[i][1], ms_level)) for i in range(len(mz_peaks))]
+        else:
+            noisy_mz_peaks = []
         noisy_mz_peaks += self.peak_sampler.get_noise_sample()
         return noisy_mz_peaks
 

@@ -518,7 +518,7 @@ class PeakSampler(LoggerMixin):
         # returns list with one numeric value
         # ignores ms_level for now
         # TODO: until we characterise the noise properly, just return the original value for now
-        return [intensity]
+        return intensity
 
     def get_msn_noisy_mz(self, mz, ms_level):
         # same as above, but for m/z
