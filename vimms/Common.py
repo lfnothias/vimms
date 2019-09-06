@@ -1,14 +1,19 @@
 import collections
 import gzip
 import logging
+import math
 import os
 import pathlib
 import pickle
+import zipfile
 from bisect import bisect_left
 
 import numpy as np
 
 # some useful constants
+import requests
+from tqdm import tqdm
+
 MZ = 'mz'
 INTENSITY = 'intensity'
 RT = 'rt'
@@ -69,7 +74,6 @@ def chromatogramDensityNormalisation(rts, intensities):
     return new_intensities
 
 
-# TODO: add other options
 # Note: M+H should come first in this dict because of the prior specification
 POS_TRANSFORMATIONS = collections.OrderedDict()
 POS_TRANSFORMATIONS['M+H'] = lambda mz: (mz + PROTON_MASS)
@@ -161,3 +165,32 @@ def find_nearest_index_in_array(array, value):
     '''
     idx = (np.abs(array - value)).argmin()
     return idx
+
+
+def download_file(url, out_file=None):
+    r = requests.get(url, stream=True)
+    total_size = int(r.headers.get('content-length', 0));
+    block_size = 1024
+    current_size = 0
+
+    if out_file is None:
+        out_file = url.rsplit('/', 1)[-1] # get the last part in url
+    print('Downloading %s' % out_file)
+
+    with open(out_file, 'wb') as f:
+        for data in tqdm(r.iter_content(block_size), total=math.ceil(total_size//block_size) , unit='KB', unit_scale=True):
+            current_size += len(data)
+            f.write(data)
+    assert current_size == total_size
+    return out_file
+
+
+def extract_zip_file(in_file, delete=True):
+    print('Extracting %s' % in_file)
+    with zipfile.ZipFile(file=in_file) as zip_file:
+        for file in tqdm(iterable=zip_file.namelist(), total=len(zip_file.namelist())):
+            zip_file.extract(member=file)
+
+    if delete:
+        print('Deleting %s' % in_file)
+        os.remove(in_file)
