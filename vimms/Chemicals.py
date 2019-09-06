@@ -429,6 +429,7 @@ class ChemicalCreator(LoggerMixin):
     def _get_unknown_msn(self, ms_level, parent=None):  # fix this
         if ms_level == 2:
             mz = self.peak_sampler.get_peak(ms_level, 1)[0].mz
+            parent_mass_prop = 1.0
         else:
             mz = self.peak_sampler.get_peak(2, 1)[0].mz
             parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
