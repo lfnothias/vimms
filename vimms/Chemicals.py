@@ -233,6 +233,13 @@ class ChemicalCreator(LoggerMixin):
         self.ROI_sources = ROI_sources
         self.database = database
 
+        # sort database compounds by their mass
+        self.logger.debug('Sorting database compounds by masses')
+        compound_mass_list = [Formula(compound.chemical_formula).mass for compound in self.database]
+        sort_index = np.argsort(compound_mass_list)
+        self.compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
+        self.compound_list = np.array(self.database)[sort_index].tolist()
+
     def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
                fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True,
                get_children_method="spectra"):
@@ -256,7 +263,7 @@ class ChemicalCreator(LoggerMixin):
         if self.ms_levels > 2:
             print("Warning ms_level > 3 not implemented properly yet. Uses scaled ms_level = 2 information for now")
         n_ms1 = self._get_n(1)
-        self.logger.debug("{} ms1 peaks to be created.".format(n_ms1))
+        self.logger.debug("{} chemicals to be created.".format(n_ms1))
         sampled_peaks = self.peak_sampler.get_peak(1, n_ms1, self.mz_range[0][0], self.mz_range[0][1],
                                                    self.rt_range[0][0],
                                                    self.rt_range[0][1], self.min_ms1_intensity)
@@ -289,8 +296,8 @@ class ChemicalCreator(LoggerMixin):
                 chem.children = self._get_children(self.get_children_method, chem)
             chem.type = CHEM_DATA
             chemicals.append(chem)
-            if i % 100 == 0:
-                self.logger.debug("i = {}".format(i))
+            # if i % 100 == 0:
+            #     self.logger.debug("i = {}".format(i))
         return chemicals
 
     def _get_n_ROI_files(self):
@@ -309,7 +316,7 @@ class ChemicalCreator(LoggerMixin):
             if len_ROI > file_index:
                 ROI_file = ROI_files[file_index - num_ROI]
                 ROI = load_obj(ROI_file)
-                self.logger.debug("Loaded {}".format(ROI_file))
+                # self.logger.debug("Loaded {}".format(ROI_file))
                 if roi_rt_range is not None:
                     ROI = self._filter_ROI(ROI, roi_rt_range)
                 return ROI
@@ -325,25 +332,26 @@ class ChemicalCreator(LoggerMixin):
         return (np.abs(ROI_intensities - intensity)).argmin()
 
     def _sample_formulae(self, sampled_peaks):
-        formula_list = []
-        compound_mass_list = []
-        for index_compound in range(len(self.database)):
-            compound_mass_list.append(Formula(self.database[index_compound].chemical_formula).mass)
-        sort_index = np.argsort(compound_mass_list)
-        compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
-        compound_list = np.array(self.database)[sort_index].tolist()
+        assert len(sampled_peaks) < len(self.database), 'The number of sampled peaks must be less than ' \
+                                                        'the number of database compounds'
+        formula_set = set()
         for formula_index in range(len(sampled_peaks)):
+            if formula_index % 500 == 0:
+                self.logger.debug('Sampling formula %d/%d' % (formula_index, len(sampled_peaks)))
+
             mz_peak_sample = sampled_peaks[formula_index].mz
+            idx = np.argsort(abs(self.compound_mass_list - mz_peak_sample))
+
             list_index = 0
             compound_found = False
             while compound_found is False:
-                new_compound = compound_list[
-                    np.argsort(abs(compound_mass_list - mz_peak_sample))[list_index]].chemical_formula
-                if str(new_compound) not in formula_list:
-                    formula_list.append(str(new_compound))
+                pos = idx[list_index]
+                new_compound = self.compound_list[pos].chemical_formula
+                if str(new_compound) not in formula_set:
+                    formula_set.add(str(new_compound))
                     compound_found = True
                 list_index += 1
-        return formula_list
+        return list(formula_set)
 
     def _get_children(self, get_children_method, parent, n_peaks=None):
         if get_children_method == "spectra":
