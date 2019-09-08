@@ -463,11 +463,11 @@ class PeakSampler(LoggerMixin):
 
     def get_peak(self, ms_level, N=None, min_mz=None, max_mz=None, min_rt=None, max_rt=None, min_intensity=None):
         if N is None:
-            N = max(self._n_peaks(ms_level, 1).astype(int)[0][0], 0)
+            N = max(self.n_peaks(ms_level, 1).astype(int)[0][0], 0)
 
         peaks = []
         while len(peaks) < N:
-            vals = self._sample(ms_level, 1)
+            vals = self.sample(ms_level, 1)
             intensity = np.exp(vals[0, 1])
             mz = vals[0, 0]
             rt = vals[0, 2]
@@ -475,6 +475,13 @@ class PeakSampler(LoggerMixin):
             if self._is_valid(p, min_mz, max_mz, min_rt, max_rt, min_intensity):  # othwerise we just keep rejecting
                 peaks.append(p)
         return peaks
+
+    def sample(self, ms_level, n_sample):
+        vals = self.kdes[(MZ_INTENSITY_RT, ms_level)].sample(n_sample)
+        return vals
+
+    def n_peaks(self, ms_level, n_sample):
+        return self.kdes[(N_PEAKS, ms_level)].sample(n_sample)
 
     def get_ms2_spectra(self, N=1):
         spectra = []
@@ -584,13 +591,6 @@ class PeakSampler(LoggerMixin):
 
             # plot if necessary
             self._plot(kde, X, data_type, filename, bandwidth)
-
-    def _sample(self, ms_level, n_sample):
-        vals = self.kdes[(MZ_INTENSITY_RT, ms_level)].sample(n_sample)
-        return vals
-
-    def _n_peaks(self, ms_level, n_sample):
-        return self.kdes[(N_PEAKS, ms_level)].sample(n_sample)
 
     def _is_valid(self, peak, min_mz, max_mz, min_rt, max_rt, min_intensity):
         if peak.intensity < 0:
