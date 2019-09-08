@@ -367,8 +367,12 @@ class ChemicalCreator(LoggerMixin):
         else:
             raise ValueError("'get_children_method' must be either 'spectra' or 'sample'")
 
-    def _get_children_spectra(self):
-        kids = self.peak_sampler.get_spectra()
+    def _get_children_spectra(self, parent):
+        # spectra is a list containing one MassSpec.Scan object
+        spectra = self.peak_sampler.get_ms2_spectra()
+
+        # TODO: convert Scans to MSn objects
+        kids = []
         return kids
 
     def _get_children_sample(self, parent, n_peaks=None):

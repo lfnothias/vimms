@@ -513,6 +513,7 @@ class PeakSampler(LoggerMixin):
         return spectra
 
     def get_noise_sample(self):
+        # TODO: finish this
         # need to choose number of noise fragments
         # then draw n noise fragments
         # returns list of ms2 noise fragments. type = MSN
@@ -520,14 +521,15 @@ class PeakSampler(LoggerMixin):
         return []
 
     def get_msn_noisy_intensity(self, intensity, ms_level):
+        # TODO: until we characterise the noise properly, just return the original value for now
         # takes intensity
         # adds noise, but ensures its positive value
         # returns list with one numeric value
         # ignores ms_level for now
-        # TODO: until we characterise the noise properly, just return the original value for now
         return intensity
 
     def get_msn_noisy_mz(self, mz, ms_level):
+        # TODO: finish this
         # same as above, but for m/z
         # Simon: We can characterise mz noise from the chromatographic peaks we extract.
         # I suggest a constant variance for now, but we might want to fit models where we account for
