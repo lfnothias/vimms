@@ -14,6 +14,8 @@ from vimms.ChineseRestaurantProcess import Restricted_Crp
 from vimms.Common import LoggerMixin, CHEM_DATA, POS_TRANSFORMATIONS, load_obj, takeClosest, save_obj
 from vimms.Chromatograms import EmpiricalChromatogram
 
+GET_MS2_BY_PEAKS = "sample"
+GET_MS2_BY_SPECTRA = "spectra"
 
 class DatabaseCompound(object):
     def __init__(self, name, chemical_formula, monisotopic_molecular_weight, smiles, inchi, inchikey):
@@ -242,7 +244,7 @@ class ChemicalCreator(LoggerMixin):
 
     def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
                fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True,
-               get_children_method="spectra"):
+               get_children_method=GET_MS2_BY_PEAKS):
         self.mz_range = mz_range
         self.rt_range = rt_range
         self.min_ms1_intensity = min_ms1_intensity
@@ -354,10 +356,10 @@ class ChemicalCreator(LoggerMixin):
         return list(formula_set)
 
     def _get_children(self, get_children_method, parent, n_peaks=None):
-        if get_children_method == "spectra":
-            kids = self._get_children_spectra()
+        if get_children_method == GET_MS2_BY_SPECTRA:
+            kids = self._get_children_spectra(parent)
             return kids
-        elif get_children_method == "sample":
+        elif get_children_method == GET_MS2_BY_PEAKS:
             kids = self._get_children_sample(parent, n_peaks)
             return kids
         # TODO: add ability to get children through prediction from parent formula

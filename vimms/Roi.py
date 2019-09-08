@@ -8,7 +8,7 @@ import pymzml
 from scipy.stats import pearsonr
 import os
 
-from vimms.Chemicals import ChemicalCreator, UnknownChemical
+from vimms.Chemicals import ChemicalCreator, UnknownChemical, GET_MS2_BY_PEAKS
 from vimms.Chromatograms import EmpiricalChromatogram
 from vimms.Common import PROTON_MASS, CHEM_NOISE, save_obj
 
@@ -276,7 +276,7 @@ class RoiToChemicalCreator(ChemicalCreator):
                 if self.peak_sampler is not None:
                     try:
                         # TODO: initialise chemical with only 1 child for the purpose of experiment, we might need to improve this
-                        chem.children = self._get_children('sample', chem, n_peaks=1)
+                        chem.children = self._get_children(GET_MS2_BY_PEAKS, chem, n_peaks=1)
                     except KeyError:
                         pass
                 self.chromatograms.append(chrom)
