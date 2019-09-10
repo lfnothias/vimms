@@ -419,8 +419,13 @@ class IndependentMassSpectrometer(MassSpectrometer):
                                           self._get_adducts(chemical)[which_adduct][0]) +
                     chemical.chromatogram.get_relative_mz(query_rt - chemical.rt))
         else:
-            return adduct_transformation(chemical.isotopes[which_isotope][0],
-                                         self._get_adducts(chemical)[which_adduct][0])
+            ms1_parent = chemical
+            while ms1_parent.ms_level != 1:
+                ms1_parent = chemical.parent
+            isotope_transformation = ms1_parent.isotopes[which_isotope][0] - ms1_parent.isotopes[0][0]
+            # TODO: Needs improving
+            return (adduct_transformation(chemical.isotopes[0][0],
+                                         self._get_adducts(chemical)[which_adduct][0]) + isotope_transformation)
 
     def _isolation_match(self, chemical, query_rt, isolation_windows, which_isotope, which_adduct):
         # assumes list is formated like:
