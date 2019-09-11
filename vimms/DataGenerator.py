@@ -562,7 +562,8 @@ class PeakSampler(LoggerMixin):
             ms2_peaks = row['ms2_peaklist']
             ms2_intensities = ms2_peaks[:, 2]
             prop = np.sum(ms2_intensities) / parent_intensity
-            intensity_props.append(prop)
+            if prop <= 1:
+                intensity_props.append(prop)
         return np.array(intensity_props)
 
     def _kde(self, data_source, filename, ms_level, bandwidth_mz_intensity_rt, bandwidth_n_peaks, max_data):

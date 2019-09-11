@@ -261,6 +261,10 @@ class ChemicalCreator(LoggerMixin):
         self.crp_index = [[] for i in range(self.ms_levels)]
         self.counts = [[] for i in range(self.ms_levels)]
 
+        # Report error if tries to use spectra to generate MS2+ spectra
+        if get_children_method == GET_MS2_BY_SPECTRA and self.ms_levels > 2:
+            NotImplementedError("Using spectra to generate MS2+ spectra is not yet implemented")
+
         # sample from kernel densities
         if self.ms_levels > 2:
             print("Warning ms_level > 3 not implemented properly yet. Uses scaled ms_level = 2 information for now")
@@ -369,10 +373,15 @@ class ChemicalCreator(LoggerMixin):
 
     def _get_children_spectra(self, parent):
         # spectra is a list containing one MassSpec.Scan object
-        spectra = self.peak_sampler.get_ms2_spectra()
 
-        # TODO: convert Scans to MSn objects
+        spectra = self.peak_sampler.get_ms2_spectra()[0]
         kids = []
+        return kids
+        intensity_props = self._get_msn_proportions(None, None, spectra.intensities)
+        parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
+        for i in range(len(spectra.mzs)):
+            kid = MSN(spectra.mzs[i], spectra.ms_level, intensity_props[i], parent_mass_prop, None, parent)
+            kids.append(kid)
         return kids
 
     def _get_children_sample(self, parent, n_peaks=None):
@@ -380,6 +389,7 @@ class ChemicalCreator(LoggerMixin):
         if n_peaks is None:
             n_peaks = self._get_n(children_ms_level)
         kids = []
+        parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
         kids_intensity_proportions = self._get_msn_proportions(children_ms_level, n_peaks)
         if self.alpha < math.inf:
             # draws from here if using Chinese Restaurant Process (SLOW!!!)
@@ -397,7 +407,7 @@ class ChemicalCreator(LoggerMixin):
                     self.crp_samples[children_ms_level - 1].append(kid)
                 else:
                     kid = copy.deepcopy(self.crp_samples[children_ms_level - 1][next_crp])
-                    kid.parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
+                    kid.parent_mass_prop = parent_mass_prop
                     kid.parent = parent
                 kids.append(kid)
             self.crp_samples[children_ms_level - 1].extend(kids)
@@ -406,18 +416,24 @@ class ChemicalCreator(LoggerMixin):
             for index_children in range(n_peaks):
                 kid = self._get_unknown_msn(children_ms_level, parent)
                 kid.prop_ms2_mass = kids_intensity_proportions[index_children]
+                kid.parent_mass_prop = parent_mass_prop
                 if children_ms_level < self.ms_levels:
                     kid.children = self._get_children(self.get_children_method, kid)
                 kids.append(kid)
         return kids
 
-    def _get_msn_proportions(self, children_ms_level, n_peaks):
-        if children_ms_level == 2:
-            kids_intensities = self.peak_sampler.get_peak(children_ms_level, n_peaks)
+    def _get_msn_proportions(self, children_ms_level=None, n_peaks=None, children_intensities=None):
+        if children_intensities is None:
+            if children_ms_level == 2:
+                kids_intensities = self.peak_sampler.get_peak(children_ms_level, n_peaks)
+            else:
+                kids_intensities = self.peak_sampler.get_peak(2, n_peaks)
+            kids_intensities_total = sum([x.intensity for x in kids_intensities])
+            kids_intensities_proportion = [x.intensity / kids_intensities_total for x in kids_intensities]
         else:
-            kids_intensities = self.peak_sampler.get_peak(2, n_peaks)
-        kids_intensities_total = sum([x.intensity for x in kids_intensities])
-        kids_intensities_proportion = [x.intensity / kids_intensities_total for x in kids_intensities]
+            kids_intensities = children_intensities
+            kids_intensities_total = sum(kids_intensities)
+            kids_intensities_proportion = kids_intensities / kids_intensities_total
         return kids_intensities_proportion
 
     def _get_n(self, ms_level):
@@ -443,13 +459,9 @@ class ChemicalCreator(LoggerMixin):
     def _get_unknown_msn(self, ms_level, parent=None):  # fix this
         if ms_level == 2:
             mz = self.peak_sampler.get_peak(ms_level, 1)[0].mz
-            parent_mass_prop = 1.0
         else:
             mz = self.peak_sampler.get_peak(2, 1)[0].mz
-            parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
-            # TODO: un-hash above code when working
-        prop_ms2_mass = None
-        return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
+        return MSN(mz, ms_level, None, None, None, parent)
 
     def _valid_ms1_chem(self, chem):
         if chem.max_intensity < self.min_ms1_intensity:
