@@ -421,13 +421,14 @@ class PeakSampler(LoggerMixin):
     # TODO: add min intensity threshold here so we don't store everything??!!!
     def __init__(self, data_source, min_rt, max_rt, min_ms1_intensity, min_ms2_intensity,
                  filename=None, plot=False,
-                 bandwidth_mz_intensity_rt=1.0, bandwidth_n_peaks=1.0):
+                 bandwidth_mz_intensity_rt=1.0, bandwidth_n_peaks=1.0, filename_to_N_DEW=None):
         self.min_rt = min_rt
         self.max_rt = max_rt
         self.min_ms1_intensity = min_ms1_intensity
         self.min_ms2_intensity = min_ms2_intensity
         self.filename = filename
         self.plot = plot
+        self.filename_to_N_DEW = filename_to_N_DEW # a dictionary that maps from filename to (N, DEW)
 
         # get all the scan dataframes across all files and combine them all
         self.all_ms2_scans = self._extract_ms2_scans(data_source)
@@ -437,8 +438,18 @@ class PeakSampler(LoggerMixin):
         self.intensity_props = self._compute_intensity_props()
 
         # extract scan durations
-        self.logger.debug('Extracting scan durations')
-        self.file_scan_durations = data_source.get_scan_durations(filename)
+        self.file_scan_durations = {} # key: (N, DEW), value: a list of scan durations for (N, DEW)
+        if filename_to_N_DEW is None:
+            # no mapping between filename to N is specified, so we just assign it a default key of 0
+            self.logger.debug('Extracting scan durations')
+            N_DEW = (0, 0) # default value if not specified
+            self.file_scan_durations[N_DEW] = data_source.get_scan_durations(filename)
+        else:
+            # store the scan durations for the different Ns
+            for filename, v in filename_to_N_DEW.items():
+                N, DEW = v
+                self.logger.debug('Extracting scan durations for N=%d DEW=%d from %s' % (N, DEW, filename))
+                self.file_scan_durations[v] = data_source.get_scan_durations(filename)
 
         # train KDEs for each ms-level
         max_data = 100000
@@ -456,10 +467,15 @@ class PeakSampler(LoggerMixin):
     # Public methods
     ####################################################################################################################
 
-    def scan_durations(self, previous_level, current_level, n_sample):
+    def scan_durations(self, previous_level, current_level, n_sample, N=0, DEW=0):
+        # the scan durations is stored for each N and DEW. If not specified, the default is (0, 0)
+        file_scan_durations = self.file_scan_durations[(N, DEW)]
         key = (previous_level, current_level,)
-        values = self.file_scan_durations[key]
-        return np.random.choice(values, replace=False, size=n_sample)
+        values = file_scan_durations[key]
+        try:
+            return np.random.choice(values, replace=False, size=n_sample)
+        except ValueError:
+            return np.array([])
 
     def get_peak(self, ms_level, N=None, min_mz=None, max_mz=None, min_rt=None, max_rt=None, min_intensity=None):
         if N is None:
@@ -507,18 +523,23 @@ class PeakSampler(LoggerMixin):
                 ms2_scan_id = idx
                 ms2_mzs = ms2_peaks[:, 0]
                 ms2_rt = ms2_peaks[0, 1]  # all the values are the same, so we can take the first one
-                ms2_intensities = ms2_peaks[:, 2]
+                ms2_intensities = ms2_peaks[:, 2] # TODO: filter by min_ms2_intensity here
                 ms2_scan = Scan(ms2_scan_id, ms2_mzs, ms2_intensities, ms_level, ms2_rt, parent=parent_peak)
                 spectra.append(ms2_scan)
         return spectra
 
     def get_noise_sample(self):
         # TODO: finish this
-        # need to choose number of noise fragments
+        # need to choose number of noise fragments from get_num_noisy_samples() below
         # then draw n noise fragments
         # returns list of ms2 noise fragments. type = MSN
         # noise fragment here is defined as ms2 peaks below some intensity threshold
         return []
+
+    def get_num_noisy_samples(self):
+        # TODO: finish this
+        # returns a distribution of the number of noise fragments
+        return 0.0
 
     def get_msn_noisy_intensity(self, intensity, ms_level):
         # TODO: until we characterise the noise properly, just return the original value for now
@@ -534,7 +555,7 @@ class PeakSampler(LoggerMixin):
         # Simon: We can characterise mz noise from the chromatographic peaks we extract.
         # I suggest a constant variance for now, but we might want to fit models where we account for
         # variability in noise variance as a function of mz itself, and intensity.
-        return [mz]
+        return mz
 
     def get_parent_intensity_proportion(self, N=1):
         # this is the proportion of all fragment intensities in a spectra over the parent intensity
