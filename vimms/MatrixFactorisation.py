@@ -145,112 +145,98 @@ def gibbs_sampler(X, observed, R, prior_u, prec_u, prior_v, prec_v, alpha, n_its
 class VB_PCA(object):
     def __init__(self, Y, Z, D, MaxIts=100, a=1, b=1, tol=1e-3, compute_LB=False, VB_PCA_model=None):
 
-        if VB_PCA_model is not None:
-            self.e_tau = VB_PCA_model.e_tau[-1]
-            self.e_X = np.concatenate((VB_PCA_model.e_X, np.random.normal(0, 1, (1,D))))
-            self.e_w = VB_PCA_model.e_w
-            self.e_XXt = VB_PCA_model.e_XXt
-            self.e_XXt.append(np.identity(D) + np.matmul(self.e_X[-1, :][np.newaxis].T, self.e_X[-1, :][np.newaxis]))
-            self.e_wwt = VB_PCA_model.e_wwt
-            self.Y = Y
-            self.Z = Z
-            ZY = Z * Y
-            M = Y.shape[1]
-            sigw = [[] for i in range(M)]
-            for it in range(MaxIts):
-                # update X
-                Zlist = [vec * np.ones((D, D)) for vec in Z[-1, :]]
-                sigx = np.linalg.inv(np.identity(D) + self.e_tau * sum(np.array(self.e_wwt) * np.array(Zlist)))
-                self.e_X[-1, :] = self.e_tau * np.matmul(sigx, np.sum(
-                    np.multiply(self.e_w, np.array([(ZY[-1, :]).tolist() for i in range(D)]).T), axis=0))
-                self.e_XXt[-1] = sigx + np.matmul(self.e_X[-1, :][np.newaxis].T, self.e_X[-1, :][np.newaxis])
+        # intialise parameters
+        self.Y = Y
+        self.Z = Z
+        self.D = D
+        ZY = Z * Y
+        self.B = []
+        self.e_tau = []
+        e_tau = a / b
+        self.e_tau.append(e_tau)
+        self.e_log_tau = [np.log(e_tau)]
+        self.N = Y.shape[0]
+        self.M = Y.shape[1]
+        self.e_w = np.random.normal(0, 1, (self.M, self.D))
+        self.e_X = np.random.normal(0, 1, (self.N, self.D))
+        self.e_wwt = []
+        self.e_XXt = []
+        for m in range(self.M):
+            self.e_wwt.append(np.identity(self.D) + np.matmul(self.e_w[m, :][np.newaxis].T, self.e_w[m, :][np.newaxis]))
+        for n in range(self.N):
+            self.e_XXt.append(np.identity(self.D) + np.matmul(self.e_X[n, :][np.newaxis].T, self.e_X[n, :][np.newaxis]))
+        self.sigx = [[] for i in range(self.N)]
+        self.sigw = [[] for i in range(self.M)]
+        # run code
+        for it in range(MaxIts):
 
-                # update e_wwt
-                for m in range(M):
-                    Zlist = [vec * np.ones((D, D)) for vec in Z[:, m]]
-                    sigw[m] = np.linalg.inv(np.identity(D) + self.e_tau * sum(np.array(self.e_XXt) * np.array(Zlist)))
-                    self.e_wwt[m] = sigw[m] + np.matmul(self.e_w[m, :][np.newaxis].T, self.e_w[m, :][np.newaxis])
-            self.Y_reconstructed = np.matmul(self.e_X, self.e_w.T)
+            # update X
+            for n in range(self.N):
+                Zlist = [vec * np.ones((self.D, self.D)) for vec in Z[n,:]]
+                self.sigx[n] = np.linalg.inv(np.identity(self.D) + e_tau * sum(np.array(self.e_wwt) * np.array(Zlist)))
+                self.e_X[n, :] = e_tau * np.matmul(self.sigx[n], np.sum(
+                    np.multiply(self.e_w, np.array([(ZY[n, :]).tolist() for i in range(self.D)]).T), axis=0))
+                self.e_XXt[n] = self.sigx[n] + np.matmul(self.e_X[n, :][np.newaxis].T, self.e_X[n, :][np.newaxis])
 
-        else:
-            # intialise parameters
-            self.Y = Y
-            self.Z = Z
-            ZY = Z * Y
-            self.B = []
-            self.e_tau = []
-            e_tau = a / b
-            self.e_tau.append(e_tau)
-            self.e_log_tau = [np.log(e_tau)]
-            N = Y.shape[0]
-            print(N)
-            M = Y.shape[1]
-            self.e_w = np.random.normal(0, 1, (M, D))
-            self.e_X = np.random.normal(0, 1, (N, D))
-            self.e_wwt = []
-            self.e_XXt = []
-            for m in range(M):
-                self.e_wwt.append(np.identity(D) + np.matmul(self.e_w[m, :][np.newaxis].T, self.e_w[m, :][np.newaxis]))
-            for n in range(N):
-                self.e_XXt.append(np.identity(D) + np.matmul(self.e_X[n, :][np.newaxis].T, self.e_X[n, :][np.newaxis]))
-            sigx = [[] for i in range(N)]
-            sigw = [[] for i in range(M)]
-            # run code
-            for it in range(MaxIts):
+            # update W
+            for m in range(self.M):
+                Zlist = [vec * np.ones((self.D, self.D)) for vec in Z[:,m]]
+                self.sigw[m] = np.linalg.inv(np.identity(self.D) + e_tau * sum(np.array(self.e_XXt) * np.array(Zlist)))
+                self.e_w[m, :] = e_tau * np.matmul(self.sigw[m], np.sum(
+                    np.multiply(self.e_X, np.array([(Y[:, m] * Z[:, m]).tolist() for i in range(self.D)]).T), axis=0))
+                self.e_wwt[m] = self.sigw[m] + np.matmul(self.e_w[m, :][np.newaxis].T, self.e_w[m, :][np.newaxis])
 
-                # update X
-                for n in range(N):
-                    Zlist = [vec * np.ones((D,D)) for vec in Z[n,:]]
-                    sigx[n] = np.linalg.inv(np.identity(D) + e_tau * sum(np.array(self.e_wwt) * np.array(Zlist)))
-                    self.e_X[n, :] = e_tau * np.matmul(sigx[n], np.sum(
-                        np.multiply(self.e_w, np.array([(ZY[n, :]).tolist() for i in range(D)]).T), axis=0))
-                    self.e_XXt[n] = sigx[n] + np.matmul(self.e_X[n, :][np.newaxis].T, self.e_X[n, :][np.newaxis])
+            # update tau
+            e = a + sum(sum(Z)) / 2
+            outer_expect = 0
+            RSS = 0
+            for n in range(self.N):
+                for m in range(self.M):
+                    outer_expect += Z[n,m] * (np.trace(np.matmul(self.e_wwt[m], self.sigx[n])) + np.matmul(
+                        np.matmul(self.e_X[n, :], self.e_wwt[m]), self.e_X[n, :][np.newaxis].T))
+                    RSS += (ZY[n, m] ** 2) - 2 * np.matmul(self.e_w[m].T, self.e_X[n]) * (ZY[n, m])
+            f = b + 0.5 * RSS + 0.5 * outer_expect
+            e_tau = e / f
+            self.e_tau.append(e_tau[0])
+            e_log_tau = np.mean(np.log(np.random.gamma(shape=e, scale=1 / f, size=1000)))
+            self.e_log_tau.append(e_log_tau)
 
-                # update W
-                for m in range(M):
-                    Zlist = [vec * np.ones((D,D)) for vec in Z[:,m]]
-                    sigw[m] = np.linalg.inv(np.identity(D) + e_tau * sum(np.array(self.e_XXt) * np.array(Zlist)))
-                    self.e_w[m, :] = e_tau * np.matmul(sigw[m], np.sum(
-                        np.multiply(self.e_X, np.array([(Y[:, m] * Z[:, m]).tolist() for i in range(D)]).T), axis=0))
-                    self.e_wwt[m] = sigw[m] + np.matmul(self.e_w[m, :][np.newaxis].T, self.e_w[m, :][np.newaxis])
+            # Compute the bound
+            if compute_LB is True:
+                LB = a * np.log(b) + (a - 1) * e_log_tau - b * e_tau - scipy.special.loggamma(a)
+                LB -= (e * np.log(f) + (e - 1) * e_log_tau - f * e_tau - scipy.special.loggamma(e))
 
-                # update tau
-                e = a + sum(sum(Z)) / 2
-                outer_expect = 0
-                RSS = 0
-                for n in range(N):
-                    for m in range(M):
-                        outer_expect += Z[n,m] * (np.trace(np.matmul(self.e_wwt[m], sigx[n])) + np.matmul(
-                            np.matmul(self.e_X[n, :], self.e_wwt[m]), self.e_X[n, :][np.newaxis].T))
-                        RSS += (ZY[n, m] ** 2) - 2 * np.matmul(self.e_w[m].T, self.e_X[n]) * (ZY[n, m])
-                f = b + 0.5 * RSS + 0.5 * outer_expect
-                e_tau = e / f
-                self.e_tau.append(e_tau[0])
-                e_log_tau = np.mean(np.log(np.random.gamma(shape=e, scale=1 / f, size=1000)))
-                self.e_log_tau.append(e_log_tau)
+                for n in range(self.N):
+                    LB += (-(self.D / 2) * np.log(2 * math.pi) - 0.5 * sum(np.diag(self.sigx[n])) + sum(self.e_X[n, :] ** 2))
+                    LB -= (-(self.D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(self.sigx[n])) - 0.5 * self.D)
 
-                # Compute the bound
-                if compute_LB is True:
-                    LB = a * np.log(b) + (a - 1) * e_log_tau - b * e_tau - scipy.special.loggamma(a)
-                    LB -= (e * np.log(f) + (e - 1) * e_log_tau - f * e_tau - scipy.special.loggamma(e))
+                for m in range(self.M):
+                    LB += (-(self.D / 2) * np.log(2 * math.pi) - 0.5 * sum(np.diag(self.sigw[m])) + sum(self.e_w[m, :] ** 2))
+                    print((-(self.D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(self.sigw[m])) - 0.5 * self.D))
+                    LB -= (-(self.D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(self.sigw[m])) - 0.5 * self.D)
 
-                    for n in range(N):
-                        LB += (-(D / 2) * np.log(2 * math.pi) - 0.5 * sum(np.diag(sigx[n])) + sum(self.e_X[n, :] ** 2))
-                        LB -= (-(D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(sigx[n])) - 0.5 * D)
+                # likelihood bit
+                LB += (-(self.N * self.M / 2) * np.log(2 * math.pi) + (self.N * self.M / 2) * e_log_tau - 0.5 * e_tau * sum(
+                    sum((ZY ** 2))) - 2 * sum(sum(Z * (np.multiply(np.matmul(self.e_w, self.e_X.T).T, Y)))) + outer_expect)
+                self.B.append(LB)
 
-                    for m in range(M):
-                        LB += (-(D / 2) * np.log(2 * math.pi) - 0.5 * sum(np.diag(sigw[m])) + sum(self.e_w[m, :] ** 2))
-                        print((-(D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(sigw[m])) - 0.5 * D))
-                        LB -= (-(D / 2) * np.log(2 * math.pi) - 0.5 * np.log(np.linalg.det(sigw[m])) - 0.5 * D)
+                # break if change in bound is less than the tolerance
+                if it > 2:
+                    if abs(self.B[-1] - self.B[-2]) < tol:
+                        break
+        # reconstruct Y
+        self.Y_reconstructed = np.matmul(self.e_X, self.e_w.T)
 
-                    # likelihood bit
-                    LB += (-(N * M / 2) * np.log(2 * math.pi) + (N * M / 2) * e_log_tau - 0.5 * e_tau * sum(
-                        sum((ZY ** 2))) - 2 * sum(sum(Z * (np.multiply(np.matmul(self.e_w, self.e_X.T).T, Y)))) + outer_expect)
-                    self.B.append(LB)
-
-                    # break if change in bound is less than the tolerance
-                    if it > 2:
-                        if abs(self.B[-1] - self.B[-2]) < tol:
-                            break
-            # reconstruct Y
-            self.Y_reconstructed = np.matmul(self.e_X, self.e_w.T)
+    def update(self, new_Z, new_Y):
+        # assume last Y is only new observations
+        self.N = new_Y.shape[0]
+        self.M = new_Y.shape[1]
+        if self.Z.shape[0] < new_Z.shape[0]:
+            self.e_X = np.concatenate((self.e_X, np.array([[0 for i in range(self.D)]])))
+            self.sigx.append(np.identity(self.D))
+        prec_x = 1 + np.dot(np.dot(self.e_w.T, np.diag(new_Z[-1, :])), self.e_w) / self.e_tau[-1]
+        self.sigx[-1] = np.linalg.inv(prec_x)
+        self.e_X[-1] = np.dot(self.sigx[-1], np.dot(self.e_w.T, (new_Y[-1,]*new_Z[-1,])))
+        self.Y = new_Y
+        self.Z = new_Z
+        self.Y_reconstructed = np.matmul(self.e_X, self.e_w.T)
