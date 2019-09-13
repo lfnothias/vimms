@@ -453,14 +453,21 @@ class HybridController(Controller):
     def __init__(self, mass_spec, N, scan_param_changepoints, isolation_window, mz_tol, rt_tol, min_ms1_intensity):
         super().__init__(mass_spec)
         self.last_ms1_scan = None
-        self.N = N
-        self.scan_param_changepoints = scan_param_changepoints
-        self.isolation_window = isolation_window  # the isolation window (in Dalton) to select a precursor ion
-        self.mz_tol = mz_tol  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
-        self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again
+        self.N = np.array(N)
+        self.scan_param_changepoints = np.array([0] + scan_param_changepoints)
+        self.isolation_window = np.array(isolation_window)  # the isolation window (in Dalton) to select a precursor ion
+        self.mz_tol = np.array(mz_tol)  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
+        self.rt_tol = np.array(rt_tol)  # the rt window to prevent the same precursor ion to be fragmented again
         self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
 
+        # make sure the input are all correct
+        assert len(self.N) == len(self.scan_param_changepoints) == len(self.isolation_window) == len(self.mz_tol) == len(self.rt_tol)
+
         mass_spec.reset()
+        current_N, current_rt_tol, idx = self._get_current_N_DEW()
+        mass_spec.current_N = current_N
+        mass_spec.current_DEW = current_rt_tol
+
         default_scan = ScanParameters()
         default_scan.set(ScanParameters.MS_LEVEL, 1)
         default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
@@ -510,10 +517,9 @@ class HybridController(Controller):
             rt = self.last_ms1_scan.rt
 
             # set up current scan parameters
-            current_N = np.array(self.N)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
-            current_isolation_window = np.array(self.isolation_window)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
-            current_rt_tol = np.array(self.rt_tol)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
-            current_mz_tol = np.array(self.mz_tol)[np.array(([0] + self.scan_param_changepoints)) < rt][-1]
+            current_N, current_rt_tol, idx = self._get_current_N_DEW()
+            current_isolation_window = self.isolation_window[idx]
+            current_mz_tol = self.mz_tol[idx]
 
             # loop over points in decreasing intensity
             fragmented_count = 0
@@ -540,6 +546,7 @@ class HybridController(Controller):
                 # send a new ms2 scan parameter to the mass spec
                 dda_scan_params = ScanParameters()
                 dda_scan_params.set(ScanParameters.MS_LEVEL, 2)
+                dda_scan_params.set(ScanParameters.N, current_N)
 
                 # create precursor object, assume it's all singly charged
                 precursor_charge = +1 if (self.mass_spec.ionisation_mode == POSITIVE) else -1
@@ -566,3 +573,9 @@ class HybridController(Controller):
 
                 # set this ms1 scan as has been processed
             self.last_ms1_scan = None
+
+    def _get_current_N_DEW(self):
+        idx = np.nonzero(self.scan_param_changepoints <= self.mass_spec.time)[0][-1]
+        current_N = self.N[idx]
+        current_rt_tol = self.rt_tol[idx]
+        return current_N, current_rt_tol, idx
