@@ -450,7 +450,8 @@ class DsDAController(Controller):
 
 
 class HybridController(Controller):
-    def __init__(self, mass_spec, N, scan_param_changepoints, isolation_window, mz_tol, rt_tol, min_ms1_intensity):
+    def __init__(self, mass_spec, N, scan_param_changepoints, isolation_window, mz_tol, rt_tol, min_ms1_intensity,
+                 n_purity_scans, purity_shift, purity_threshold):
         super().__init__(mass_spec)
         self.last_ms1_scan = None
         self.N = N
@@ -459,6 +460,12 @@ class HybridController(Controller):
         self.mz_tol = mz_tol  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
         self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again
         self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
+
+        self.n_purity_scans = n_purity_scans
+        self.purity_shift = purity_shift
+        self.purity_threshold = purity_threshold
+
+        # TODO: add some purity checks
 
         mass_spec.reset()
         default_scan = ScanParameters()
