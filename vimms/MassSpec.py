@@ -62,6 +62,7 @@ class ScanParameters(object):
     DYNAMIC_EXCLUSION_MZ_TOL = 'mz_tol'
     DYNAMIC_EXCLUSION_RT_TOL = 'rt_tol'
     TIME = 'time'
+    N = 'N'
 
     def __init__(self):
         self.params = {}
@@ -162,6 +163,10 @@ class IndependentMassSpectrometer(MassSpectrometer):
         self.chrom_max_rts = np.array([chem.chromatogram.max_rt for chem in self.chemicals]) + chem_rts
         self.exclusion_list = []  # a list of ExclusionItem
 
+        # required to sample for different scan durations based on (N, DEW) in the hybrid controller
+        self.current_N = 0
+        self.current_DEW = 0
+
     def run(self, min_time, max_time, pbar=None):
         if self.schedule_file is None:
             self.time = min_time
@@ -200,6 +205,8 @@ class IndependentMassSpectrometer(MassSpectrometer):
                     # update dynamic exclusion list to prevent the same precursor ion being fragmented multiple times in
                     # the same mz and rt window
                     # Note: at this point, fragmentation has occurred and time has been incremented!
+                    # TODO: we need to add a repeat count too, i.e. how many times we've seen a fragment peak before
+                    #  it gets excluded (now it's basically 1)
                     mz = precursor.precursor_mz
                     mz_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL)
                     rt_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
@@ -223,7 +230,13 @@ class IndependentMassSpectrometer(MassSpectrometer):
                 # print a progress bar if provided
                 if pbar is not None:
                     elapsed = self.time - initial_time
+                    if self.current_N > 0 and self.current_DEW > 0:
+                        msg = '(%.3fs) ms_level=%d N=%d DEW=%d' % (self.time, scan.ms_level,
+                                                                   self.current_N, self.current_DEW)
+                    else:
+                        msg = '(%.3fs) ms_level=%d' % (self.time, scan.ms_level)
                     pbar.update(elapsed)
+                    pbar.set_description(msg)
 
         finally:
             self.fire_event(MassSpectrometer.ACQUISITION_STREAM_CLOSING)
@@ -243,11 +256,28 @@ class IndependentMassSpectrometer(MassSpectrometer):
             try:
                 next_scan_param = self.queue[0]
                 next_level = next_scan_param.get(ScanParameters.MS_LEVEL)
+
+                # Only the hybrid controller sends these N and DEW parameters
+                # So for other controllers they will be None
+                next_N = next_scan_param.get(ScanParameters.N)
+                next_DEW = next_scan_param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
             except IndexError:  # if queue is empty, the next one is an MS1 scan by default
                 next_level = 1
+                next_N = None
+                next_DEW = None
+
             current_level = scan.ms_level
-            current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1).flatten()[0]
-            scan.scan_duration = current_scan_duration
+
+            # get scan duration based on current and next level
+            if current_level == 1 and next_level == 1:
+                # special case: for the transition (1, 1), we want to get the scan duration from N=0 and DEW=0
+                # because that's how we store it in the peak sampler object for the full scan data
+                current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
+                                                                         N=0, DEW=0)
+            else:
+                current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
+                                                                         N=self.current_N, DEW=self.current_DEW)
+            scan.scan_duration = current_scan_duration.flatten()[0]
 
             # increase simulator scan index and time
             self.idx += 1
@@ -255,6 +285,11 @@ class IndependentMassSpectrometer(MassSpectrometer):
                 self.time += scan.scan_duration
             else:
                 self.time = self.schedule["targetTime"][self.idx]
+
+            # keep track of the N and DEW values for the next scan if they have been changed by the Hybrid Controller
+            if next_N is not None:
+                self.current_N = next_N
+                self.current_DEW = next_DEW
             return scan
         else:
             return None
@@ -268,7 +303,7 @@ class IndependentMassSpectrometer(MassSpectrometer):
     def set_repeating_scan(self, params):
         self.repeating_scan_parameters = params
 
-    def reset(self):
+    def reset(self): # TODO: should reset other stuff initialised in the constructor too
         for key in self.event_dict:  # clear event handlers
             self.clear(key)
         self.time = 0  # reset internal time and index to 0
