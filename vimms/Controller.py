@@ -63,6 +63,9 @@ class SimpleMs1Controller(Controller):
         default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
 
         mass_spec.reset()
+        mass_spec.current_N = 0
+        mass_spec.current_DEW = 0
+
         mass_spec.set_repeating_scan(default_scan)
         mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
         mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
@@ -113,6 +116,9 @@ class TopNController(Controller):
         self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
 
         mass_spec.reset()
+        mass_spec.current_N = N
+        mass_spec.current_DEW = rt_tol
+
         default_scan = ScanParameters()
         default_scan.set(ScanParameters.MS_LEVEL, 1)
         default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
@@ -389,6 +395,8 @@ class DsDAController(Controller):
         self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
 
         mass_spec.reset()
+        mass_spec.current_N = N
+        mass_spec.current_DEW = rt_tol
 
         # register new event handlers under this controller
         mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)

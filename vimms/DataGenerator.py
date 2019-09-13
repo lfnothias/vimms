@@ -467,8 +467,8 @@ class PeakSampler(LoggerMixin):
     # Public methods
     ####################################################################################################################
 
-    def scan_durations(self, previous_level, current_level, n_sample, N=0, DEW=0):
-        # the scan durations is stored for each N and DEW. If not specified, the default is (0, 0)
+    def scan_durations(self, previous_level, current_level, n_sample, N, DEW):
+        # the scan durations is stored for each N and DEW combination
         file_scan_durations = self.file_scan_durations[(N, DEW)]
         key = (previous_level, current_level,)
         values = file_scan_durations[key]

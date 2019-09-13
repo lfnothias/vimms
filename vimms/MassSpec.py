@@ -270,11 +270,14 @@ class IndependentMassSpectrometer(MassSpectrometer):
 
             # get scan duration based on current and next level
             if current_level == 1 and next_level == 1:
-                # special case: for the transition (1, 1), we want to get the scan duration from N=0 and DEW=0
-                # because that's how we store it in the peak sampler object for the full scan data
-                current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
-                                                                         N=0, DEW=0)
-            else:
+                # special case: for the transition (1, 1), we can try to get the times for the
+                # fullscan data (N=0, DEW=0) if it's stored
+                try:
+                    current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1, N=0, DEW=0)
+                except KeyError: ## ooops not found
+                    current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
+                                                                             N=self.current_N, DEW=self.current_DEW)
+            else: # for (1, 2), (2, 1) and (2, 2)
                 current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
                                                                          N=self.current_N, DEW=self.current_DEW)
             scan.scan_duration = current_scan_duration.flatten()[0]
