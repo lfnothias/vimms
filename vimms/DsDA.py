@@ -9,7 +9,7 @@ from vimms.Common import load_obj
 
 def get_schedule(n, schedule_dir):
     while True:
-        files = sorted(glob.glob(schedule_dir + '\\*.csv'))
+        files = sorted(glob.glob(os.path.join(schedule_dir, '*.csv')))
         if len(files) == n:
             last_file = files[-1]
             try:
