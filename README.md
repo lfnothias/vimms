@@ -1,8 +1,8 @@
 Virtual Metabolomics Mass Spectrometry (ViMMS)
 ==============================================
 
-1. Abstract
-------------
+Abstract
+---------
 
 ![ViMMS Schematic](images/schematic.png?raw=true "ViMMS Schematic")
 
@@ -24,7 +24,7 @@ novel fragmentation strategies and optimisation of the fragmentation strategy fo
 Here is an example showing actual experimental spectra vs our simulated results.
 ![Example Spectra](images/spectra.png?raw=true "Example Spectra")
 
-2. Installation
+Installation
 ---------------
 
 Stable version
