@@ -473,10 +473,10 @@ class HybridController(Controller):
         self.purity_shift = purity_shift
         self.purity_threshold = purity_threshold
 
-        # TODO: add some purity checks
         # make sure the input are all correct
         assert len(self.N) == len(self.scan_param_changepoints) == len(self.isolation_window) == len(self.mz_tol) == len(self.rt_tol)
-        assert all(self.n_purity_scans < np.array(self.N))
+        if self.purity_threshold != 1:
+            assert all(self.n_purity_scans < np.array(self.N))
 
         mass_spec.reset()
         current_N, current_rt_tol, idx = self._get_current_N_DEW()
