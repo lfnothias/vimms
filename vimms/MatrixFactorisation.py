@@ -234,7 +234,7 @@ class VB_PCA(object):
         if self.Z.shape[0] < new_Z.shape[0]:
             self.e_X = np.concatenate((self.e_X, np.array([[0 for i in range(self.D)]])))
             self.sigx.append(np.identity(self.D))
-        prec_x = 1 + np.dot(np.dot(self.e_w.T, np.diag(new_Z[-1, :])), self.e_w) / self.e_tau[-1]
+        prec_x = 1 + np.dot(np.dot(self.e_w.T, np.diag(new_Z[-1, :])), self.e_w) * self.e_tau[-1]
         self.sigx[-1] = np.linalg.inv(prec_x)
         self.e_X[-1] = np.dot(self.sigx[-1], np.dot(self.e_w.T, (new_Y[-1,]*new_Z[-1,])))
         self.Y = new_Y
