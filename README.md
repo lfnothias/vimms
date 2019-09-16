@@ -49,6 +49,12 @@ Example Notebooks
 
 Notebooks that demonstrate how to use ViMMS are available in the [examples](https://github.com/sdrogers/vimms/tree/master/examples) folder of this repository.
 
+Binder
+--------
+
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/sdrogers/vimms/master)
+
+
 Publication
 ------------
 
