@@ -1,9 +1,8 @@
 Virtual Metabolomics Mass Spectrometry (ViMMS)
 ==============================================
-Latest stable release: <a href="https://zenodo.org/badge/latestdoi/196360601"><img src="https://zenodo.org/badge/196360601.svg" alt="DOI"></a>
 
 Abstract
---------
+---------
 
 ![ViMMS Schematic](images/schematic.png?raw=true "ViMMS Schematic")
 
@@ -26,16 +25,24 @@ Here is an example showing actual experimental spectra vs our simulated results.
 ![Example Spectra](images/spectra.png?raw=true "Example Spectra")
 
 Installation
-------------
+---------------
 
-To use the latest ViMMS code in this repository:
+Stable version
+
+
+ViMMS requires Python 3+. Unfortunately it is not compatible with Python 2. You can install the stable version of ViMMS using pip:through pypi using pip:
+
+```pip install vimms```
+
+You can download the latest stable release for the paper in review from here: <a href="https://zenodo.org/badge/latestdoi/196360601"><img src="https://zenodo.org/badge/196360601.svg" alt="DOI"></a>
+
+To use the latest bleeding-edge ViMMS code in this repository:
 
 1. Install Python 3. We recommend Python 3.6 or 3.7.
 2. Install pipenv (https://pipenv.readthedocs.io/en/latest/).
-3. In this directory, run `$ pipenv install` to create a new virtual environment and install all the packages we need.
-4. Run jupyter notebook. 
-
-Alternatively, you can also install release versions of ViMMS using pip: `$ pip install vimms`. 
+3. Clone this repository.
+4. In this cloned directory, run `$ pipenv install` to create a new virtual environment and install all the packages need to run ViMMS.
+5. Run jupyter notebook. 
 
 Example Notebooks
 --------
