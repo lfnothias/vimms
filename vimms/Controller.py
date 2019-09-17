@@ -459,11 +459,14 @@ class DsDAController(Controller):
 
 class HybridController(Controller):
     def __init__(self, mass_spec, N, scan_param_changepoints, isolation_window, mz_tol, rt_tol, min_ms1_intensity,
-                 n_purity_scans=None, purity_shift=None, purity_threshold=1):
+                 n_purity_scans=None, purity_shift=None, purity_threshold=0):
         super().__init__(mass_spec)
         self.last_ms1_scan = None
         self.N = np.array(N)
-        self.scan_param_changepoints = np.array([0] + scan_param_changepoints)
+        if scan_param_changepoints is not None:
+            self.scan_param_changepoints = np.array([0] + scan_param_changepoints)
+        else:
+            self.scan_param_changepoints = np.array([0])
         self.isolation_window = np.array(isolation_window)  # the isolation window (in Dalton) to select a precursor ion
         self.mz_tol = np.array(mz_tol)  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
         self.rt_tol = np.array(rt_tol)  # the rt window to prevent the same precursor ion to be fragmented again
@@ -475,7 +478,7 @@ class HybridController(Controller):
 
         # make sure the input are all correct
         assert len(self.N) == len(self.scan_param_changepoints) == len(self.isolation_window) == len(self.mz_tol) == len(self.rt_tol)
-        if self.purity_threshold != 1:
+        if self.purity_threshold != 0:
             assert all(self.n_purity_scans < np.array(self.N))
 
         mass_spec.reset()
