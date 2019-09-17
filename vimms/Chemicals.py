@@ -236,11 +236,12 @@ class ChemicalCreator(LoggerMixin):
         self.database = database
 
         # sort database compounds by their mass
-        self.logger.debug('Sorting database compounds by masses')
-        compound_mass_list = [Formula(compound.chemical_formula).mass for compound in self.database]
-        sort_index = np.argsort(compound_mass_list)
-        self.compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
-        self.compound_list = np.array(self.database)[sort_index].tolist()
+        if self.database is not None:
+            self.logger.debug('Sorting database compounds by masses')
+            compound_mass_list = [Formula(compound.chemical_formula).mass for compound in self.database]
+            sort_index = np.argsort(compound_mass_list)
+            self.compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
+            self.compound_list = np.array(self.database)[sort_index].tolist()
 
     def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
                fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True,
