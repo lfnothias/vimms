@@ -23,6 +23,7 @@ joblib = "*"
 ipyparallel = "*"
 seaborn = "*"
 requests = "*"
+trio = "*"
 
 [dev-packages]
 
