@@ -108,7 +108,7 @@ class MassSpectrometer(LoggerMixin):
             self.ACQUISITION_STREAM_CLOSING: self.events.AcquisitionStreamClosing
         }
 
-    def get_next_scan(self):
+    def generate_scan(self):
         raise NotImplementedError()
 
     def fire_event(self, event_name, arg=None):
@@ -168,134 +168,155 @@ class IndependentMassSpectrometer(MassSpectrometer):
         self.current_DEW = 0
 
     def run(self, min_time, max_time, pbar=None):
-        if self.schedule_file is None:
-            self.time = min_time
-        else:
-            self.time = self.schedule["targetTime"].values[0]
-            max_time = self.schedule["targetTime"].values[-1]
+        max_time = self._init_time(max_time, min_time)
         self.fire_event(MassSpectrometer.ACQUISITION_STREAM_OPENING)
         try:
             while self.time < max_time:
+                # get scan param from queue and do one scan
                 initial_time = self.time
+                param = self._get_param()
+                scan = self.generate_scan(param)
 
-                # if the processing queue is empty, then just do the repeating scan
-                if len(self.queue) == 0:
-                    param = self.repeating_scan_parameters
-                else:
-                    # otherwise pop the parameter for the next scan from the queue
-                    param = self.queue.pop(0)
-
-                # do one scan and increase time
-                scan = self.get_next_scan(param)
+                # increase simulator scan index and time
+                self._increase_time(scan)
                 self.logger.info('Time %f Len(queue)=%d' % (self.time, len(self.queue)))
 
-                # if MS2 and above, and the controller tells us which precursor ion the scan is coming from, store it
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if scan.ms_level >= 2 and precursor is not None:
                     # update precursor ion information
-                    isolation_windows = param.get(ScanParameters.ISOLATION_WINDOWS)
-                    iso_min = isolation_windows[0][0][0]
-                    iso_max = isolation_windows[0][0][1]
-                    self.logger.debug('Time {:.6f} Isolated precursor ion {:.4f} at ({:.4f}, {:.4f})'.format(self.time,
-                                                                                                             precursor.precursor_mz,
-                                                                                                             iso_min,
-                                                                                                             iso_max))
-                    self.precursor_information[precursor].append(scan)
+                    # if MS2 and above, and controller tells us which precursor ion the scan is coming from, store it
+                    self._update_precursor_info(param, precursor, scan)
 
                     # update dynamic exclusion list to prevent the same precursor ion being fragmented multiple times in
                     # the same mz and rt window
-                    # Note: at this point, fragmentation has occurred and time has been incremented!
-                    # TODO: we need to add a repeat count too, i.e. how many times we've seen a fragment peak before
-                    #  it gets excluded (now it's basically 1)
-                    mz = precursor.precursor_mz
-                    mz_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL)
-                    rt_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
-                    mz_lower = mz * (1 - mz_tol / 1e6)
-                    mz_upper = mz * (1 + mz_tol / 1e6)
-                    rt_lower = self.time
-                    rt_upper = self.time + rt_tol
-                    x = ExclusionItem(from_mz=mz_lower, to_mz=mz_upper, from_rt=rt_lower, to_rt=rt_upper)
-                    self.logger.debug('Time {:.6f} Created dynamic exclusion window mz ({}-{}) rt ({}-{})'.format(
-                        self.time,
-                        x.from_mz, x.to_mz, x.from_rt, x.to_rt
-                    ))
-                    self.exclusion_list.append(x)
+                    # Note: at this point, fragmentation has occurred and time has been incremented! so the time when
+                    # items are checked for dynamic exclusion is the time when MS2 fragmentation occurs
+                    self._update_dynamic_exclusion(param, precursor)
 
                 # remove expired items from dynamic exclusion list
-                self.exclusion_list = list(filter(lambda x: x.to_rt > self.time, self.exclusion_list))
+                self._removed_expired_dew()
 
                 # store previous ms_level
                 self.previous_level = scan.ms_level
 
                 # print a progress bar if provided
-                if pbar is not None:
-                    elapsed = self.time - initial_time
-                    if self.current_N > 0 and self.current_DEW > 0:
-                        msg = '(%.3fs) ms_level=%d N=%d DEW=%d' % (self.time, scan.ms_level,
-                                                                   self.current_N, self.current_DEW)
-                    else:
-                        msg = '(%.3fs) ms_level=%d' % (self.time, scan.ms_level)
-                    pbar.update(elapsed)
-                    pbar.set_description(msg)
+                self._update_progress_bar(initial_time, pbar, scan)
 
         finally:
             self.fire_event(MassSpectrometer.ACQUISITION_STREAM_CLOSING)
             if pbar is not None:
                 pbar.close()
 
-    def get_next_scan(self, param):
-        if param is not None:
-            # generate a new scan at self.time
-            scan = self._get_scan(self.time, param)
+    def _init_time(self, max_time, min_time):
+        if self.schedule_file is None:
+            self.time = min_time
+        else:
+            self.time = self.schedule["targetTime"].values[0]
+            max_time = self.schedule["targetTime"].values[-1]
+        return max_time
 
-            # notify controller about this scan
-            # the queue will be updated by the controller if necessary
-            self.fire_event(self.MS_SCAN_ARRIVED, scan)
+    def _increase_time(self, scan):
+        self.idx += 1
+        if self.schedule_file is None:
+            self.time += scan.scan_duration
+        else:
+            self.time = self.schedule["targetTime"][self.idx]
 
-            # look into the queue, find out what the next scan ms_level is, and compute the scan duration
+    def _update_progress_bar(self, initial_time, pbar, scan):
+        if pbar is not None:
+            elapsed = self.time - initial_time
+            if self.current_N > 0 and self.current_DEW > 0:
+                msg = '(%.3fs) ms_level=%d N=%d DEW=%d' % (self.time, scan.ms_level,
+                                                           self.current_N, self.current_DEW)
+            else:
+                msg = '(%.3fs) ms_level=%d' % (self.time, scan.ms_level)
+            pbar.update(elapsed)
+            pbar.set_description(msg)
+
+    def _removed_expired_dew(self):
+        self.exclusion_list = list(filter(lambda x: x.to_rt > self.time, self.exclusion_list))
+
+    def _update_dynamic_exclusion(self, param, precursor):
+        # TODO: we need to add a repeat count too, i.e. how many times we've seen a fragment peak before
+        #  it gets excluded (now it's basically 1)
+        mz = precursor.precursor_mz
+        mz_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL)
+        rt_tol = param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
+        mz_lower = mz * (1 - mz_tol / 1e6)
+        mz_upper = mz * (1 + mz_tol / 1e6)
+        rt_lower = self.time
+        rt_upper = self.time + rt_tol
+        x = ExclusionItem(from_mz=mz_lower, to_mz=mz_upper, from_rt=rt_lower, to_rt=rt_upper)
+        self.logger.debug('Time {:.6f} Created dynamic exclusion window mz ({}-{}) rt ({}-{})'.format(
+            self.time,
+            x.from_mz, x.to_mz, x.from_rt, x.to_rt
+        ))
+        self.exclusion_list.append(x)
+
+    def _update_precursor_info(self, param, precursor, scan):
+        isolation_windows = param.get(ScanParameters.ISOLATION_WINDOWS)
+        iso_min = isolation_windows[0][0][0]
+        iso_max = isolation_windows[0][0][1]
+        self.logger.debug('Time {:.6f} Isolated precursor ion {:.4f} at ({:.4f}, {:.4f})'.format(self.time,
+                                                                                                 precursor.precursor_mz,
+                                                                                                 iso_min,
+                                                                                                 iso_max))
+        self.precursor_information[precursor].append(scan)
+
+    def _get_param(self):
+        # if the processing queue is empty, then just do the repeating scan
+        if len(self.queue) == 0:
+            param = self.repeating_scan_parameters
+        else:
+            # otherwise pop the parameter for the next scan from the queue
+            param = self.queue.pop(0)
+        return param
+
+    def generate_scan(self, param):
+        # generate a new scan at self.time
+        scan = self._get_scan(self.time, param)
+
+        # notify controller about this scan
+        # the queue will be updated by the controller if necessary
+        self.fire_event(self.MS_SCAN_ARRIVED, scan)
+
+        # look into the queue, find out what the next scan ms_level is, and compute the scan duration
+        # TODO: need to coordinate with the controller here to find out what's the next ms level going to be
+        # only applicable for simulated mass spec, since the real mass spec can generate its own scan duration.
+        try:
+            next_scan_param = self.queue[0]
+            next_level = next_scan_param.get(ScanParameters.MS_LEVEL)
+
+            # Only the hybrid controller sends these N and DEW parameters
+            # So for other controllers they will be None
+            next_N = next_scan_param.get(ScanParameters.N)
+            next_DEW = next_scan_param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
+        except IndexError:  # if queue is empty, the next one is an MS1 scan by default
+            next_level = 1
+            next_N = None
+            next_DEW = None
+
+        current_level = scan.ms_level
+
+        # get scan duration based on current and next level
+        if current_level == 1 and next_level == 1:
+            # special case: for the transition (1, 1), we can try to get the times for the
+            # fullscan data (N=0, DEW=0) if it's stored
             try:
-                next_scan_param = self.queue[0]
-                next_level = next_scan_param.get(ScanParameters.MS_LEVEL)
-
-                # Only the hybrid controller sends these N and DEW parameters
-                # So for other controllers they will be None
-                next_N = next_scan_param.get(ScanParameters.N)
-                next_DEW = next_scan_param.get(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL)
-            except IndexError:  # if queue is empty, the next one is an MS1 scan by default
-                next_level = 1
-                next_N = None
-                next_DEW = None
-
-            current_level = scan.ms_level
-
-            # get scan duration based on current and next level
-            if current_level == 1 and next_level == 1:
-                # special case: for the transition (1, 1), we can try to get the times for the
-                # fullscan data (N=0, DEW=0) if it's stored
-                try:
-                    current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1, N=0, DEW=0)
-                except KeyError: ## ooops not found
-                    current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
-                                                                             N=self.current_N, DEW=self.current_DEW)
-            else: # for (1, 2), (2, 1) and (2, 2)
+                current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1, N=0, DEW=0)
+            except KeyError: ## ooops not found
                 current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
                                                                          N=self.current_N, DEW=self.current_DEW)
-            scan.scan_duration = current_scan_duration.flatten()[0]
+        else: # for (1, 2), (2, 1) and (2, 2)
+            current_scan_duration = self.peak_sampler.scan_durations(current_level, next_level, 1,
+                                                                     N=self.current_N, DEW=self.current_DEW)
+        scan.scan_duration = current_scan_duration.flatten()[0]
 
-            # increase simulator scan index and time
-            self.idx += 1
-            if self.schedule_file is None:
-                self.time += scan.scan_duration
-            else:
-                self.time = self.schedule["targetTime"][self.idx]
-
-            # keep track of the N and DEW values for the next scan if they have been changed by the Hybrid Controller
-            if next_N is not None:
-                self.current_N = next_N
-                self.current_DEW = next_DEW
-            return scan
-        else:
-            return None
+        # keep track of the N and DEW values for the next scan if they have been changed by the Hybrid Controller
+        if next_N is not None:
+            self.current_N = next_N
+            self.current_DEW = next_DEW
+        return scan
 
     def add_to_queue(self, param):
         self.queue.append(param)
