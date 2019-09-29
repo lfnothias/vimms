@@ -3,16 +3,21 @@ import glob
 import math
 import random
 import re
+from pathlib import Path
 
 import numpy as np
 import scipy
 import scipy.stats
+import copy
 
 from vimms.ChineseRestaurantProcess import Restricted_Crp
 from vimms.Common import LoggerMixin, CHEM_DATA, POS_TRANSFORMATIONS, load_obj, takeClosest, save_obj
+from vimms.Chromatograms import EmpiricalChromatogram
 
+GET_MS2_BY_PEAKS = "sample"
+GET_MS2_BY_SPECTRA = "spectra"
 
-class Compound(object):
+class DatabaseCompound(object):
     def __init__(self, name, chemical_formula, monisotopic_molecular_weight, smiles, inchi, inchikey):
         self.name = name
         self.chemical_formula = chemical_formula
@@ -72,7 +77,7 @@ class Isotopes(object):
         self.formula = formula
         self.C12_proportion = 0.989
         self.mz_diff = 1.0033548378
-        # TODO: Add fucntionality for elements other than Carbon
+        # TODO: Add functionality for elements other than Carbon
 
     def get_isotopes(self, total_proportion):
         peaks = [() for i in range(len(self._get_isotope_proportions(total_proportion)))]
@@ -156,6 +161,7 @@ class UnknownChemical(Chemical):
         self.chromatogram = chromatogram
         self.children = children
         self.ms_level = 1
+        self.mz_diff = 0
 
     def __repr__(self):
         return 'UnknownChemical mz=%.4f rt=%.2f max_intensity=%.2f' % (
@@ -176,10 +182,16 @@ class KnownChemical(Chemical):
     """
 
     def __init__(self, formula, isotopes, adducts, rt, max_intensity, chromatogram, children=None,
-                 total_proportion=0.99):
+                 include_adducts_isotopes=True, total_proportion=0.99):
         self.formula = formula
-        self.isotopes = isotopes.get_isotopes(total_proportion)
-        self.adducts = adducts.get_adducts()
+        self.mz_diff = isotopes.mz_diff
+        if include_adducts_isotopes == True:
+            self.isotopes = isotopes.get_isotopes(total_proportion)
+            self.adducts = adducts.get_adducts()
+        else:
+            mz = isotopes.get_isotopes(total_proportion)[0][0]
+            self.isotopes = [(mz, 1, "Mono")]
+            self.adducts = [("M+H", 1)]
         self.rt = rt
         self.max_intensity = max_intensity
         self.chromatogram = chromatogram
@@ -189,6 +201,15 @@ class KnownChemical(Chemical):
     def __repr__(self):
         return 'KnownChemical - %r rt=%.2f max_intensity=%.2f' % (
             self.formula.formula_string, self.rt, self.max_intensity)
+
+    def __eq__(self, other):
+        if not isinstance(other, KnownChemical):
+            return False
+        return self.formula.formula_string == other.formula.formula_string
+
+    def __hash__(self):
+        return hash(self.formula.formula_string)
+
 
 
 class MSN(Chemical):
@@ -214,38 +235,47 @@ class ChemicalCreator(LoggerMixin):
         self.ROI_sources = ROI_sources
         self.database = database
 
-    def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, use_database=True, alpha=math.inf,
-               fixed_mz=False, adduct_proportion_cutoff=0.05):
+        # sort database compounds by their mass
+        if self.database is not None:
+            self.logger.debug('Sorting database compounds by masses')
+            compound_mass_list = [Formula(compound.chemical_formula).mass for compound in self.database]
+            sort_index = np.argsort(compound_mass_list)
+            self.compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
+            self.compound_list = np.array(self.database)[sort_index].tolist()
+
+    def sample(self, mz_range, rt_range, min_ms1_intensity, n_ms1_peaks, ms_levels, alpha=math.inf,
+               fixed_mz=False, adduct_proportion_cutoff=0.05, roi_rt_range=None, include_adducts_isotopes=True,
+               get_children_method=GET_MS2_BY_PEAKS):
         self.mz_range = mz_range
         self.rt_range = rt_range
         self.min_ms1_intensity = min_ms1_intensity
         self.n_ms1_peaks = n_ms1_peaks
         self.ms_levels = ms_levels
-        self.use_database = use_database
         self.alpha = alpha
         self.fixed_mz = fixed_mz
         self.adduct_proportion_cutoff = adduct_proportion_cutoff
+        self.include_adducts_isotopes = include_adducts_isotopes
+        self.get_children_method = get_children_method
 
         # set up some counters
         self.crp_samples = [[] for i in range(self.ms_levels)]
         self.crp_index = [[] for i in range(self.ms_levels)]
         self.counts = [[] for i in range(self.ms_levels)]
 
+        # Report error if tries to use spectra to generate MS2+ spectra
+        if get_children_method == GET_MS2_BY_SPECTRA and self.ms_levels > 2:
+            NotImplementedError("Using spectra to generate MS2+ spectra is not yet implemented")
+
         # sample from kernel densities
         if self.ms_levels > 2:
             print("Warning ms_level > 3 not implemented properly yet. Uses scaled ms_level = 2 information for now")
         n_ms1 = self._get_n(1)
-        self.logger.debug("{} ms1 peaks to be created.".format(n_ms1))
-        sampled_peaks = self.peak_sampler.sample(1, n_ms1, self.mz_range[0][0], self.mz_range[0][1],
-                                                 self.rt_range[0][0],
-                                                 self.rt_range[0][1], self.min_ms1_intensity)
+        self.logger.debug("{} chemicals to be created.".format(n_ms1))
+        sampled_peaks = self.peak_sampler.get_peak(1, n_ms1, self.mz_range[0][0], self.mz_range[0][1],
+                                                   self.rt_range[0][0],
+                                                   self.rt_range[0][1], self.min_ms1_intensity)
         # Get formulae from database and check there are enough of them
-        if self.use_database == True:
-            if len(self.database) < n_ms1 or self.database is None:
-                self.logger.warning(
-                    'Warning: Not enough compounds in the database. Compounds are not being used. No adducts and isoptopes will be created')
-                self.use_database = False
-            self.formula_list = self._sample_formulae(sampled_peaks)
+        self.formula_list = self._sample_formulae(sampled_peaks)
 
         # Get file split information
         split = self._get_n_ROI_files()
@@ -254,70 +284,113 @@ class ChemicalCreator(LoggerMixin):
         chemicals = []
         # load first ROI file
         current_ROI = 0
-        ROIs = self._load_ROI_file(current_ROI)
+        ROIs = self._load_ROI_file(current_ROI, roi_rt_range)
         ROI_intensities = np.array([r.max_intensity for r in ROIs])
         for i in range(n_ms1):
             if i == sum(split[0:(current_ROI + 1)]):
                 current_ROI += 1
-                ROIs = self._load_ROI_file(current_ROI)
+                ROIs = self._load_ROI_file(current_ROI, roi_rt_range)
                 ROI_intensities = np.array([r.max_intensity for r in ROIs])
-            if self.use_database == True:
-                formula = self.formula_list[i]
-            else:
-                formula = None
+            formula = self.formula_list[i]
             ROI = ROIs[self._get_ROI_idx(ROI_intensities, sampled_peaks[i].intensity)]
-            chem = self._get_chemical(1, formula, ROI, sampled_peaks[i])
-            if self.fixed_mz == True:
+            chem = self._get_known_ms1(formula, ROI, sampled_peaks[i], self.include_adducts_isotopes)
+            if self.fixed_mz:
+                chem.chromatogram.mzs = [0 for i in range(
+                    len(chem.chromatogram.raw_mzs))]
                 chem.mzs = [0 for i in range(
-                    len(chem.chromatogram.raw_mzs))]  # not sure how this will work. Not sure why this is set to 0?
+                    len(chem.chromatogram.raw_mzs))]
             if ms_levels > 1:
-                chem.children = self._get_children(1, chem)
+                chem.children = self._get_children(self.get_children_method, chem)
             chem.type = CHEM_DATA
             chemicals.append(chem)
-            if i % 100 == 0:
-                self.logger.debug("i = {}".format(i))
+            # if i % 100 == 0:
+            #     self.logger.debug("i = {}".format(i))
         return chemicals
 
     def _get_n_ROI_files(self):
         count = 0
         for i in range(len(self.ROI_sources)):
-            count += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            count += len(list(Path(self.ROI_sources[i]).glob('*.p')))
         split = np.array([int(np.floor(self.n_ms1_peaks / count)) for i in range(count)])
         split[0:int(self.n_ms1_peaks - sum(split))] += 1
         return split
 
-    def _load_ROI_file(self, file_index):
+    def _load_ROI_file(self, file_index, roi_rt_range=None):
         num_ROI = 0
         for i in range(len(self.ROI_sources)):
-            len_ROI = len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            ROI_files = list(Path(self.ROI_sources[i]).glob('*.p'))
+            len_ROI = len(ROI_files)
             if len_ROI > file_index:
-                ROI_file = glob.glob(self.ROI_sources[i] + '\\*.p')[file_index - num_ROI]
+                ROI_file = ROI_files[file_index - num_ROI]
                 ROI = load_obj(ROI_file)
-                self.logger.debug("Loaded {}".format(ROI_file))
+                # self.logger.debug("Loaded {}".format(ROI_file))
+                if roi_rt_range is not None:
+                    ROI = self._filter_ROI(ROI, roi_rt_range)
                 return ROI
-            num_ROI += len(glob.glob(self.ROI_sources[i] + '\\*.p'))
+            num_ROI += len_ROI
+
+    def _filter_ROI(self, ROI, roi_rt_range):
+        lower = roi_rt_range[0]
+        upper = roi_rt_range[1]
+        results = [chem for chem in ROI if lower < np.abs(chem.chromatogram.max_rt - chem.chromatogram.min_rt) < upper]
+        return results
 
     def _get_ROI_idx(self, ROI_intensities, intensity):
         return (np.abs(ROI_intensities - intensity)).argmin()
 
     def _sample_formulae(self, sampled_peaks):
-        formula_list = []
-        compound_mass_list = []
-        for index_compound in range(len(self.database)):
-            compound_mass_list.append(Formula(self.database[index_compound].chemical_formula).mass)
-        sort_index = np.argsort(compound_mass_list)
-        compound_mass_list = np.array(compound_mass_list)[sort_index].tolist()
-        compound_list = np.array(self.database)[sort_index].tolist()
+        assert len(sampled_peaks) < len(self.database), 'The number of sampled peaks must be less than ' \
+                                                        'the number of database compounds'
+        formula_set = set()
         for formula_index in range(len(sampled_peaks)):
-            mz_peak_sample = sampled_peaks[formula_index].mz
-            formula_list.append(compound_list[takeClosest(compound_mass_list, mz_peak_sample)].chemical_formula)
-        return formula_list
+            if formula_index % 500 == 0:
+                self.logger.debug('Sampling formula %d/%d' % (formula_index, len(sampled_peaks)))
 
-    def _get_children(self, parent_ms_level, parent, n_peaks=None):  # TODO: this should be moved to the mass spec class
-        children_ms_level = parent_ms_level + 1
+            mz_peak_sample = sampled_peaks[formula_index].mz
+            idx = np.argsort(abs(self.compound_mass_list - mz_peak_sample))
+
+            list_index = 0
+            compound_found = False
+            while compound_found is False:
+                pos = idx[list_index]
+                new_compound = self.compound_list[pos].chemical_formula
+                if str(new_compound) not in formula_set:
+                    formula_set.add(str(new_compound))
+                    compound_found = True
+                list_index += 1
+        return list(formula_set)
+
+    def _get_children(self, get_children_method, parent, n_peaks=None):
+        if get_children_method == GET_MS2_BY_SPECTRA:
+            kids = self._get_children_spectra(parent)
+            return kids
+        elif get_children_method == GET_MS2_BY_PEAKS:
+            kids = self._get_children_sample(parent, n_peaks)
+            return kids
+        # TODO: add ability to get children through prediction from parent formula
+        # will need to add a default if MS2+ is requested
+        else:
+            raise ValueError("'get_children_method' must be either 'spectra' or 'sample'")
+
+    def _get_children_spectra(self, parent):
+        # spectra is a list containing one MassSpec.Scan object
+
+        spectra = self.peak_sampler.get_ms2_spectra()[0]
+        kids = []
+        return kids
+        intensity_props = self._get_msn_proportions(None, None, spectra.intensities)
+        parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
+        for i in range(len(spectra.mzs)):
+            kid = MSN(spectra.mzs[i], spectra.ms_level, intensity_props[i], parent_mass_prop, None, parent)
+            kids.append(kid)
+        return kids
+
+    def _get_children_sample(self, parent, n_peaks=None):
+        children_ms_level = parent.ms_level + 1
         if n_peaks is None:
             n_peaks = self._get_n(children_ms_level)
         kids = []
+        parent_mass_prop = self.peak_sampler.get_parent_intensity_proportion()
         kids_intensity_proportions = self._get_msn_proportions(children_ms_level, n_peaks)
         if self.alpha < math.inf:
             # draws from here if using Chinese Restaurant Process (SLOW!!!)
@@ -328,94 +401,75 @@ class ChemicalCreator(LoggerMixin):
                                                                               index_children)
                 self.crp_index[children_ms_level - 1].append(next_crp)
                 if next_crp == max(self.crp_index[children_ms_level - 1]):
-                    kid = self._get_unknown_msn(children_ms_level, None, None, parent)
+                    kid = self._get_unknown_msn(children_ms_level, parent)
                     kid.prop_ms2_mass = kids_intensity_proportions[index_children]
                     if children_ms_level < self.ms_levels:
-                        kid.children = self._get_children(children_ms_level, kid)
+                        kid.children = self._get_children(self.get_children_method, kid)
                     self.crp_samples[children_ms_level - 1].append(kid)
                 else:
                     kid = copy.deepcopy(self.crp_samples[children_ms_level - 1][next_crp])
-                    kid.parent_mass_prop = self._get_parent_mass_prop(children_ms_level)
+                    kid.parent_mass_prop = parent_mass_prop
                     kid.parent = parent
                 kids.append(kid)
             self.crp_samples[children_ms_level - 1].extend(kids)
         else:
             # Draws from here if children all independent
             for index_children in range(n_peaks):
-                kid = self._get_unknown_msn(children_ms_level, None, None, parent)
+                kid = self._get_unknown_msn(children_ms_level, parent)
                 kid.prop_ms2_mass = kids_intensity_proportions[index_children]
+                kid.parent_mass_prop = parent_mass_prop
                 if children_ms_level < self.ms_levels:
-                    kid.children = self._get_children(children_ms_level, kid)
+                    kid.children = self._get_children(self.get_children_method, kid)
                 kids.append(kid)
         return kids
 
-    def _get_msn_proportions(self, children_ms_level, n_peaks):
-        if children_ms_level == 2:
-            kids_intensities = self.peak_sampler.sample(children_ms_level, n_peaks)
+    def _get_msn_proportions(self, children_ms_level=None, n_peaks=None, children_intensities=None):
+        if children_intensities is None:
+            if children_ms_level == 2:
+                kids_intensities = self.peak_sampler.get_peak(children_ms_level, n_peaks)
+            else:
+                kids_intensities = self.peak_sampler.get_peak(2, n_peaks)
+            kids_intensities_total = sum([x.intensity for x in kids_intensities])
+            kids_intensities_proportion = [x.intensity / kids_intensities_total for x in kids_intensities]
         else:
-            kids_intensities = self.peak_sampler.sample(2, n_peaks)
-        kids_intensities_total = sum([x.intensity for x in kids_intensities])
-        kids_intensities_proportion = [x.intensity / kids_intensities_total for x in kids_intensities]
+            kids_intensities = children_intensities
+            kids_intensities_total = sum(kids_intensities)
+            kids_intensities_proportion = kids_intensities / kids_intensities_total
         return kids_intensities_proportion
 
     def _get_n(self, ms_level):
         if ms_level == 1:
             return int(self.n_ms1_peaks)
-            # TODO: give the option to sample this from a density
         elif ms_level == 2:
-            return int(self.peak_sampler.density_estimator.n_peaks(2, 1))
+            return int(self.peak_sampler.n_peaks(2, 1))
         else:
-            return int(math.floor(self.peak_sampler.density_estimator.n_peaks(2, 1) / (5 ** (ms_level - 2))))
+            return int(math.floor(self.peak_sampler.n_peaks(2, 1) / (5 ** (ms_level - 2))))
 
-    def _get_chemical(self, ms_level, formula, ROI, sampled_peak):
-        # self._get_chemical(1, formula, ROI, sampled_peaks[i])
-        if formula != None:
-            return self._get_known_ms1(formula, ROI, sampled_peak)
-        else:
-            return self._get_unknown_msn(ms_level, ROI, sampled_peak)
-
-    def _get_known_ms1(self, formula, ROI, sampled_peak):  # fix this
+    def _get_known_ms1(self, formula, ROI, sampled_peak, include_adducts_isotopes):  # fix this
         ## from sampled_peak.rt (XCMS output), we get the point where maximum intensity occurs
         ## so when convering ROI to chemicals, we want to adjust the RT to align it with the point where max intensity occurs
         rt = sampled_peak.rt
         min2mid_rt_ROI = list(ROI.chromatogram.rts[np.where(ROI.chromatogram.intensities == 1)])[0]
         adjusted_rt = rt - min2mid_rt_ROI
-
         intensity = sampled_peak.intensity
         formula = Formula(formula)
         isotopes = Isotopes(formula)
         adducts = Adducts(formula, self.adduct_proportion_cutoff)
-        return KnownChemical(formula, isotopes, adducts, adjusted_rt, intensity, ROI.chromatogram, None)
+        return KnownChemical(formula, isotopes, adducts, adjusted_rt, intensity, ROI.chromatogram, None, include_adducts_isotopes)
 
-    def _get_unknown_msn(self, ms_level, ROI, sampled_peak, parent=None):  # fix this
-        if ms_level == 1:
-            mz = sampled_peak.mz
-            ## from sampled_peak.rt (XCMS output), we get the point where maximum intensity occurs
-            ## so when convering ROI to chemicals, we want to adjust the RT to align it with the point where max intensity occurs
-            rt = sampled_peak.rt
-            min2mid_rt_ROI = list(ROI.chromatogram.rts[np.where(ROI.chromatogram.intensities == 1)])[0]
-            adjusted_rt = rt - min2mid_rt_ROI
-            intensity = sampled_peak.intensity
-            return UnknownChemical(mz, adjusted_rt, intensity, ROI.chromatogram, None)
+    def _get_unknown_msn(self, ms_level, parent=None):  # fix this
+        if ms_level == 2:
+            mz = self.peak_sampler.get_peak(ms_level, 1)[0].mz
         else:
-            if ms_level == 2:
-                mz = self.peak_sampler.sample(ms_level, 1)[0].mz
-            else:
-                mz = self.peak_sampler.sample(2, 1)[0].mz
-            parent_mass_prop = self._get_parent_mass_prop(ms_level)
-            prop_ms2_mass = None
-            return MSN(mz, ms_level, prop_ms2_mass, parent_mass_prop, None, parent)
-
-    def _get_parent_mass_prop(self, ms_level):
-        return np.random.uniform(0.5, 0.9, 1).tolist()[0]
-        # TODO: this needs to come from a density
+            mz = self.peak_sampler.get_peak(2, 1)[0].mz
+        return MSN(mz, ms_level, None, None, None, parent)
 
     def _valid_ms1_chem(self, chem):
         if chem.max_intensity < self.min_ms1_intensity:
             return False
-        elif chem.rt < self.min_rt:
+        elif chem.rt < self.rt_range[0][0]:
             return False
-        elif chem.rt > self.max_rt:
+        elif chem.rt > self.rt_range[0][1]:
             return False
         return True
 
@@ -465,7 +519,7 @@ class MultiSampleCreator(LoggerMixin):
             chemicals_to_keep = np.where((np.array(self.chemical_statuses)[which_class][0]) != "missing")
             new_sample = np.array(new_sample)[chemicals_to_keep].tolist()
             if self.save_location is not None:
-                save_obj(new_sample, self.save_location + '\\sample_%d.p' % index_sample)
+                save_obj(new_sample, Path(self.save_location, 'sample_%d.p' % index_sample))
             self.samples.append(new_sample)
 
     def _get_chemical_statuses(self):
@@ -474,6 +528,7 @@ class MultiSampleCreator(LoggerMixin):
                                                    p=[self.change_probabilities[i], 1 - self.change_probabilities[i]])
                                   for i in range(len(self.classes) - 1)])
         self.missing = self._get_missing_chemicals(chemical_statuses)
+        self.missing_chemicals = [np.array(self.original_dataset)[miss].tolist() for miss in self.missing]
         for index_chemical in range(len(chemical_statuses)):
             chemical_statuses[index_chemical][self.missing[index_chemical]] = "missing"
         return chemical_statuses
@@ -555,3 +610,19 @@ def get_key(chem):
     :return: a tuple of the three values
     '''
     return (tuple(chem.isotopes), chem.rt, chem.max_intensity)
+
+def RestrictedChemicalCreator(N, ps, prop_ms2_mass=0.7, mz_range = [(0,1000)]):
+    dataset = []
+    chrom = EmpiricalChromatogram(np.array([0,20]),np.array([0,0]),np.array([1,1]))
+    for i in range(N):
+        mz = ps.get_peak(1, 1, mz_range[0][0], mz_range[0][1])[0].mz
+        chem = UnknownChemical(mz, 0, 1E5, chrom, children=None)
+        n_children = int(ps.n_peaks(2, 1))
+        parent_mass_prop = [1/n_children for k in range(n_children)]
+        children = []
+        for j in range(n_children):
+            mz = ps.get_peak(2, 1)[0].mz
+            children.append(MSN(mz, 2, prop_ms2_mass, parent_mass_prop[j], None, chem))
+        chem.children = children
+        dataset.append(chem)
+    return dataset

@@ -1,7 +1,9 @@
+import os
+
 import numpy as np
 from psims.mzml.writer import MzMLWriter as PsimsMzMLWriter
 
-from vimms.Common import DEFAULT_MS1_SCAN_WINDOW
+from vimms.Common import DEFAULT_MS1_SCAN_WINDOW, create_if_not_exist
 
 
 class MzmlWriter(object):
@@ -19,6 +21,11 @@ class MzmlWriter(object):
         self.precursor_information = precursor_information
 
     def write_mzML(self, out_file):
+        # if directory doesn't exist, create it
+        out_dir = os.path.dirname(out_file)
+        create_if_not_exist(out_dir)
+
+        # start writing mzML here
         with PsimsMzMLWriter(open(out_file, 'wb')) as writer:
             # add default controlled vocabularies
             writer.controlled_vocabularies()
