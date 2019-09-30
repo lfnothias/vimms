@@ -236,7 +236,7 @@ class VB_PCA(object):
             self.sigx.append(np.identity(self.D))
         prec_x = np.identity(self.D) + np.dot(np.dot(self.e_w.T, np.diag(new_Z[-1, :])), self.e_w) * self.e_tau[-1]
         self.sigx[-1] = np.linalg.inv(prec_x)
-        self.e_X[-1] = np.dot(self.sigx[-1], np.dot(self.e_w.T, (new_Y[-1,]*new_Z[-1,])))
+        self.e_X[-1] = np.dot(self.sigx[-1], np.dot(self.e_w.T, (new_Y[-1,]*new_Z[-1,]))) * self.e_tau[-1]
         self.Y = new_Y
         self.Z = new_Z
         self.Y_reconstructed = np.matmul(self.e_X, self.e_w.T)
