@@ -141,7 +141,7 @@ ExclusionItem = namedtuple('ExclusionItem', 'from_mz to_mz from_rt to_rt')
 # Independent here refers to how the intensity of each peak in a scan is independent of each other
 # i.e. there's no ion supression effect
 class IndependentMassSpectrometer(MassSpectrometer):
-    def __init__(self, ionisation_mode, chemicals, peak_sampler, schedule_file=None, add_noise=False):
+    def __init__(self, ionisation_mode, chemicals, peak_sampler, schedule_file=None, add_noise=False, use_exclusion_list=True):
         super().__init__(ionisation_mode)
         self.chemicals = chemicals
         self.peak_sampler = peak_sampler
@@ -154,6 +154,7 @@ class IndependentMassSpectrometer(MassSpectrometer):
         if self.schedule_file is not None:
             self.schedule = pd.read_csv(schedule_file)
         self.add_noise = add_noise # whether to add noise to the generated fragment peaks
+        self.use_exclusion_list = use_exclusion_list
 
         self.fragmentation_events = []  # which chemicals produce which peaks
         self.previous_level = None  # ms_level of the previous scan
@@ -214,15 +215,17 @@ class IndependentMassSpectrometer(MassSpectrometer):
                     mz_upper = mz * (1 + mz_tol / 1e6)
                     rt_lower = self.time
                     rt_upper = self.time + rt_tol
-                    x = ExclusionItem(from_mz=mz_lower, to_mz=mz_upper, from_rt=rt_lower, to_rt=rt_upper)
-                    self.logger.debug('Time {:.6f} Created dynamic exclusion window mz ({}-{}) rt ({}-{})'.format(
-                        self.time,
-                        x.from_mz, x.to_mz, x.from_rt, x.to_rt
-                    ))
-                    self.exclusion_list.append(x)
+                    if self.use_exclusion_list:
+                        x = ExclusionItem(from_mz=mz_lower, to_mz=mz_upper, from_rt=rt_lower, to_rt=rt_upper)
+                        self.logger.debug('Time {:.6f} Created dynamic exclusion window mz ({}-{}) rt ({}-{})'.format(
+                            self.time,
+                            x.from_mz, x.to_mz, x.from_rt, x.to_rt
+                        ))
+                        self.exclusion_list.append(x)
 
                 # remove expired items from dynamic exclusion list
-                self.exclusion_list = list(filter(lambda x: x.to_rt > self.time, self.exclusion_list))
+                if self.use_exclusion_list:
+                    self.exclusion_list = list(filter(lambda x: x.to_rt > self.time, self.exclusion_list))
 
                 # store previous ms_level
                 self.previous_level = scan.ms_level
@@ -311,6 +314,7 @@ class IndependentMassSpectrometer(MassSpectrometer):
             self.clear(key)
         self.time = 0  # reset internal time and index to 0
         self.idx = 0
+        self.exclusion_list = []
 
     def exclude(self, mz, rt):  # TODO: make this faster?
         for x in self.exclusion_list:
@@ -528,3 +532,4 @@ class DsDAMassSpec(IndependentMassSpectrometer):
 
 #     def __next__(self):
 #         raise NotImplementedError()
+
