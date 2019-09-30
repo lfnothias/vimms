@@ -647,19 +647,25 @@ class HybridController(Controller):
         return current_N, current_rt_tol, idx
 
 
-class RoiTopNController(Controller):
-    def __init__(self, mass_spec, N, isolation_window, mz_tol, rt_tol, min_ms1_intensity, min_roi_intensity, min_roi_length, score_method, score_params=None):
+
+
+class RoiController(Controller):
+    """
+    An ROI based controller with multiple options
+    """
+
+    def __init__(self, mass_spec, isolation_window, mz_tol, min_ms1_intensity, min_roi_intensity, min_roi_length,
+                 score_method, N=None, rt_tol=math.inf, score_params=None):
         super().__init__(mass_spec)
         self.last_ms1_scan = None
         self.N = N
         self.isolation_window = isolation_window  # the isolation window (in Dalton) to select a precursor ion
         self.mz_tol = mz_tol  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
-        self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again #TODO: remove
+        self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again
         self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
 
         # ROI stuff
         self.min_roi_intensity = min_roi_intensity
-        self.mz_tol = mz_tol
         self.mz_units = 'Da'
         self.min_roi_length = min_roi_length
 
@@ -685,9 +691,9 @@ class RoiTopNController(Controller):
         mass_spec.set_repeating_scan(default_scan)
 
         # register new event handlers under this controller
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, min_time=None, max_time=None, progress_bar=True):
         if min_time is None and max_time is None:
@@ -724,35 +730,27 @@ class RoiTopNController(Controller):
         # if there's a previous ms1 scan to process
         if self.last_ms1_scan is not None:
 
-            self.currrent_roi_mzs = [roi.get_mean_mz() for roi in self.live_roi]
+            self.current_roi_mzs = [roi.get_mean_mz() for roi in self.live_roi]
             self.current_roi_intensities = [roi.get_max_intensity() for roi in self.live_roi]
             rt = self.last_ms1_scan.rt
 
-            # loop over points in decreasing intensity
-            self.fragmented_count = 0
-            idx = np.argsort(self.current_roi_intensities)[::-1]
+            # loop over points in decreasing score
+            scores = self.get_scores(self.score_method, self.score_params)
+            idx = np.argsort(scores)[::-1]
             for i in idx:
-                mz = self.currrent_roi_mzs[i]
+                mz = self.current_roi_mzs[i]
                 intensity = self.current_roi_intensities[i]
 
-                # stopping criteria is after we've fragmented N ions or we found ion < min_intensity
-                if self.fragmented_count >= self.N:
+                # stopping criteria is done based on the scores
+                if scores[i] <= 0:
                     self.logger.debug('Time %f Top-%d ions have been selected' % (self.mass_spec.time, self.N))
                     break
 
-                if intensity < self.min_ms1_intensity:
-                    self.logger.debug(
-                        'Time %f Minimum intensity threshold %f reached at %f, %d' % (
-                        self.mass_spec.time, self.min_ms1_intensity, intensity, self.fragmented_count))
-                    break
-
-                # skip ion in the dynamic exclusion list of the mass spec
+                # updated fragmented list and times
                 if self.live_roi_fragmented[i]:
                     continue
                 self.live_roi_fragmented[i] = True
-                self.live_roi_last_rt[i] = rt  #TODO: May want to update this to use the time of the MS2 scan
-
-                scores = self.get_scores(self.score_method, self.score_params)
+                self.live_roi_last_rt[i] = rt  # TODO: May want to update this to use the time of the MS2 scan
 
                 # send a new ms2 scan parameter to the mass spec
                 dda_scan_params = ScanParameters()
@@ -768,16 +766,14 @@ class RoiTopNController(Controller):
                 dda_scan_params.set(ScanParameters.ISOLATION_WINDOWS, isolation_windows)
                 dda_scan_params.set(ScanParameters.PRECURSOR, precursor)
 
-                # TODO: Maybe delete below lines
                 # save dynamic exclusion parameters too
                 dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL, self.mz_tol)
                 dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, self.rt_tol)
 
                 # push this dda scan parameter to the mass spec queue
-                self.mass_spec.add_to_queue(dda_scan_params)
-                self.fragmented_count += 1
+                self.mass_spec.add_task(dda_scan_params)
 
-            for param in self.mass_spec.queue:
+            for param in self.mass_spec.get_task_queue():
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if precursor is not None:
                     self.logger.debug('- %s' % str(precursor))
@@ -819,18 +815,16 @@ class RoiTopNController(Controller):
                 del self.live_roi_last_rt[pos]
 
     def get_scores(self, score_method, params):
-        if score_method == "Top N ROI":
-            # TODO: remove next if statement and just set self.rt_tol to Inf if None is specified
-            if self.rt_tol is None:  # Here we exclude if ROI has been fragmented
-                scores = np.log(self.current_roi_intensities) * (np.log(self.current_roi_intensities) > np.log(self.min_ms1_intensity)) * np.array([int(roi == "False") for roi in self.live_roi_fragmented])
-                # TODO: set scores to 0 if not in top N
-            else:
-                scores = 1
-
-
-
-
-
-
-
+        if score_method == "Top N":
+            scores = np.log(self.current_roi_intensities)  # log intensities
+            scores *= (np.log(self.current_roi_intensities) > np.log(self.min_ms1_intensity))  # intensity filter
+            scores *= (1 - np.array(self.live_roi_fragmented).astype(int))  # exclusion time filter
+            if len(scores) > self.N:  # number of fragmentation events filter
+                scores[scores.argsort()[:(len(scores)-self.N)]] = 0
+        elif score_method == "Regression Top N":
+            # uses regresion methods instead of indicator functions
+            scores = np.log(self.current_roi_intensities)  # log intensities
+            # TODO: some other methods here
+            # thinking of stores models in a dictionary maybe
+            # then can just select the right one - potentially allowing us to just fit one once and save
         return scores
