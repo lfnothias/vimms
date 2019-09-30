@@ -7,7 +7,7 @@ import pylab as plt
 from tqdm import tqdm
 
 from vimms.Common import POSITIVE, DEFAULT_MS1_SCAN_WINDOW, LoggerMixin
-from vimms.MassSpec import ScanParameters, MassSpectrometer
+from vimms.MassSpec import ScanParameters, IndependentMassSpectrometer
 from vimms.MzmlWriter import MzmlWriter
 from vimms.Roi import *
 
@@ -72,9 +72,9 @@ class SimpleMs1Controller(Controller):
         mass_spec.current_DEW = 0
 
         mass_spec.set_repeating_scan(default_scan)
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, min_time, max_time, progress_bar=True):
         if progress_bar:
@@ -134,9 +134,9 @@ class TopNController(Controller):
         mass_spec.set_repeating_scan(default_scan)
 
         # register new event handlers under this controller
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, min_time=None, max_time=None, progress_bar=True):
         if min_time is None and max_time is None:
@@ -195,7 +195,7 @@ class TopNController(Controller):
                     break
 
                 # skip ion in the dynamic exclusion list of the mass spec
-                if self.mass_spec.exclude(mz, rt):
+                if self.mass_spec.is_excluded(mz, rt):
                     continue
 
                 # send a new ms2 scan parameter to the mass spec
@@ -217,10 +217,10 @@ class TopNController(Controller):
                 dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, self.rt_tol)
 
                 # push this dda scan parameter to the mass spec queue
-                self.mass_spec.add_to_queue(dda_scan_params)
+                self.mass_spec.add_task(dda_scan_params)
                 fragmented_count += 1
 
-            for param in self.mass_spec.queue:
+            for param in self.mass_spec.get_task_queue():
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if precursor is not None:
                     self.logger.debug('- %s' % str(precursor))
@@ -245,9 +245,9 @@ class TreeController(Controller):
         default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
         mass_spec.set_repeating_scan(default_scan)
 
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, min_time, max_time, progress_bar=True):
         if progress_bar:
@@ -292,7 +292,7 @@ class TreeController(Controller):
                 dda_scan_params = ScanParameters()
                 dda_scan_params.set(ScanParameters.MS_LEVEL, 2)
                 dda_scan_params.set(ScanParameters.ISOLATION_WINDOWS, isolation_windows)
-                self.mass_spec.add_to_queue(dda_scan_params)  # push this dda scan to the mass spec queue
+                self.mass_spec.add_task(dda_scan_params)  # push this dda scan to the mass spec queue
 
             # set this ms1 scan as has been processed
             self.last_ms1_scan = None
@@ -408,9 +408,9 @@ class DsDAController(Controller):
         mass_spec.current_DEW = rt_tol
 
         # register new event handlers under this controller
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, schedule_file, progress_bar=True):
         self.schedule = pd.read_csv(schedule_file)
@@ -438,7 +438,7 @@ class DsDAController(Controller):
             dda_scan_params.set(ScanParameters.TIME, target_time)
             if precursor:
                 dda_scan_params.set(ScanParameters.PRECURSOR, precursor)
-            self.mass_spec.add_to_queue(dda_scan_params)  # push this scan to the mass spec queue
+            self.mass_spec.add_task(dda_scan_params)  # push this scan to the mass spec queue
 
         if progress_bar:
             with tqdm(total=target_time,
@@ -501,9 +501,9 @@ class HybridController(Controller):
         mass_spec.set_repeating_scan(default_scan)
 
         # register new event handlers under this controller
-        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
-        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+        mass_spec.register(IndependentMassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(IndependentMassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
 
     def run(self, min_time=None, max_time=None, progress_bar=True):
         if min_time is None and max_time is None:
@@ -578,7 +578,7 @@ class HybridController(Controller):
                     break
 
                 # skip ion in the dynamic exclusion list of the mass spec
-                if self.mass_spec.exclude(mz, rt):
+                if self.mass_spec.is_excluded(mz, rt):
                     continue
 
                 if purity < self.purity_threshold:
@@ -605,7 +605,7 @@ class HybridController(Controller):
                         dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, current_rt_tol)
 
                         # push this dda scan parameter to the mass spec queue
-                        self.mass_spec.add_to_queue(dda_scan_params)
+                        self.mass_spec.add_task(dda_scan_params)
                         fragmented_count += 1
                         # need to work out what we want to do here
                 else:
@@ -629,10 +629,10 @@ class HybridController(Controller):
                     dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, current_rt_tol)
 
                     # push this dda scan parameter to the mass spec queue
-                    self.mass_spec.add_to_queue(dda_scan_params)
+                    self.mass_spec.add_task(dda_scan_params)
                     fragmented_count += 1
 
-            for param in self.mass_spec.queue:
+            for param in self.mass_spec.get_task_queue():
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if precursor is not None:
                     self.logger.debug('- %s' % str(precursor))

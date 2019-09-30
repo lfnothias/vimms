@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>PSI_Interface</id>
+    <version>1.3.22</version>
+    <title>PSI Interface</title>
+    <authors>PNNL-Comp-Mass-Spec</authors>
+    <owners>PNNL-Comp-Mass-Spec</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://opensource.org/licenses/ECL-2.0</licenseUrl>
+    <projectUrl>https://github.com/PNNL-Comp-Mass-Spec/PSI-Interface</projectUrl>
+    <description>Set of classes for reading and writing mzML and mzIdentML files, with classes that allow full access to all features of the formats, and classes designed to quickly read both formats.</description>
+    <copyright>Copyright @ PNNL 2017</copyright>
+    <repository type="GitHub" url="https://github.com/PNNL-Comp-Mass-Spec/PSI-Interface" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.5">
+        <dependency id="DotNetZip" version="1.10.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Iconic.Zlib.Netstandard" version="1.0.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

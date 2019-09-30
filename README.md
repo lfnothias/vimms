@@ -43,6 +43,7 @@ To use the latest bleeding-edge ViMMS code in this repository:
 3. Clone this repository.
 4. In this cloned directory, run `$ pipenv install` to create a new virtual environment and install all the packages need to run ViMMS.
 5. Run jupyter notebook. 
+6. For IAPI assembly binding to work, copy the file `python.exe.config` to the same folder as the Python interpreter in the virtual environment.
 
 Example Notebooks
 --------
@@ -60,3 +61,4 @@ Publication
 
 To reference ViMMS in your work, please cite the following:
 - https://www.biorxiv.org/content/10.1101/744227v1?rss=1 (under review).
+>>>>>>> master
