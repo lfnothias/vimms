@@ -178,7 +178,7 @@ class UnknownChemical(Chemical):
 
 class KnownChemical(Chemical):
     """
-    Chemical from an known chemical formula
+    Chemical from a known chemical formula
     """
 
     def __init__(self, formula, isotopes, adducts, rt, max_intensity, chromatogram, children=None,
