@@ -197,7 +197,7 @@ class IndependentMassSpectrometer(LoggerMixin):
             self.schedule = pd.read_csv(schedule_file)
 
         # current task queue
-        self.processing_queue = []
+        self.task_queue = []
         self.repeating_scan_parameters = None
 
         # the events here follows IAPI events
@@ -264,7 +264,7 @@ class IndependentMassSpectrometer(LoggerMixin):
                 current_N = self.current_N
                 current_DEW = self.current_DEW
                 try:
-                    next_scan_param = self.get_processing_queue()[0]
+                    next_scan_param = self.get_task_queue()[0]
                 except IndexError:
                     next_scan_param = None
                 current_scan_duration = self._increase_time(current_level, current_N, current_DEW,
@@ -287,20 +287,20 @@ class IndependentMassSpectrometer(LoggerMixin):
             if pbar is not None:
                 pbar.close()
 
-    def get_processing_queue(self):
+    def get_task_queue(self):
         """
         Returns the current processing queue
         :return:
         """
-        return self.processing_queue
+        return self.task_queue
 
-    def add_to_processing_queue(self, param):
+    def add_task(self, param):
         """
         Adds a new scan parameters to the processing queue of scan parameters. Usually done by the controllers.
         :param param: the scan parameters to add
         :return: None
         """
-        self.processing_queue.append(param)
+        self.task_queue.append(param)
 
     def disable_repeating_scan(self):
         """
@@ -326,7 +326,7 @@ class IndependentMassSpectrometer(LoggerMixin):
             self.clear(key)
         self.time = 0
         self.idx = 0
-        self.processing_queue = []
+        self.task_queue = []
         self.repeating_scan_parameters = None
         self.current_N = 0
         self.current_DEW = 0
@@ -416,11 +416,11 @@ class IndependentMassSpectrometer(LoggerMixin):
         :return: A new set of scan parameters from the queue if available, otherwise it returns the default scan params.
         """
         # if the processing queue is empty, then just do the repeating scan
-        if len(self.processing_queue) == 0:
+        if len(self.task_queue) == 0:
             param = self.repeating_scan_parameters
         else:
             # otherwise pop the parameter for the next scan from the queue
-            param = self.processing_queue.pop(0)
+            param = self.task_queue.pop(0)
         return param
 
     def _increase_time(self, current_level, current_N, current_DEW, next_scan_param):
@@ -441,7 +441,7 @@ class IndependentMassSpectrometer(LoggerMixin):
             current_scan_duration = new_time - self.time
 
         self.time += current_scan_duration
-        self.logger.info('Time %f Len(queue)=%d' % (self.time, len(self.processing_queue)))
+        self.logger.info('Time %f Len(queue)=%d' % (self.time, len(self.task_queue)))
         return current_scan_duration
 
     def _sample_scan_duration(self, current_DEW, current_N, current_level, next_level):
@@ -718,8 +718,8 @@ class DsDAMassSpec(IndependentMassSpectrometer):
 
         try:
             last_ms1_id = 0
-            while len(self.processing_queue) != 0:
-                scan_params = self.processing_queue.pop(0)
+            while len(self.task_queue) != 0:
+                scan_params = self.task_queue.pop(0)
 
                 # make a scan
                 target_time = scan_params.get(ScanParameters.TIME)
@@ -727,7 +727,7 @@ class DsDAMassSpec(IndependentMassSpectrometer):
 
                 # set scan duration
                 try:
-                    next_time = self.processing_queue[0].get(ScanParameters.TIME)
+                    next_time = self.task_queue[0].get(ScanParameters.TIME)
                 except IndexError:
                     next_time = 1
                 scan.scan_duration = next_time - target_time

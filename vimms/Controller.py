@@ -208,10 +208,10 @@ class TopNController(Controller):
                 dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, self.rt_tol)
 
                 # push this dda scan parameter to the mass spec queue
-                self.mass_spec.add_to_processing_queue(dda_scan_params)
+                self.mass_spec.add_task(dda_scan_params)
                 fragmented_count += 1
 
-            for param in self.mass_spec.get_processing_queue():
+            for param in self.mass_spec.get_task_queue():
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if precursor is not None:
                     self.logger.debug('- %s' % str(precursor))
@@ -283,7 +283,7 @@ class TreeController(Controller):
                 dda_scan_params = ScanParameters()
                 dda_scan_params.set(ScanParameters.MS_LEVEL, 2)
                 dda_scan_params.set(ScanParameters.ISOLATION_WINDOWS, isolation_windows)
-                self.mass_spec.add_to_processing_queue(dda_scan_params)  # push this dda scan to the mass spec queue
+                self.mass_spec.add_task(dda_scan_params)  # push this dda scan to the mass spec queue
 
             # set this ms1 scan as has been processed
             self.last_ms1_scan = None
@@ -429,7 +429,7 @@ class DsDAController(Controller):
             dda_scan_params.set(ScanParameters.TIME, target_time)
             if precursor:
                 dda_scan_params.set(ScanParameters.PRECURSOR, precursor)
-            self.mass_spec.add_to_processing_queue(dda_scan_params)  # push this scan to the mass spec queue
+            self.mass_spec.add_task(dda_scan_params)  # push this scan to the mass spec queue
 
         if progress_bar:
             with tqdm(total=target_time,
@@ -596,7 +596,7 @@ class HybridController(Controller):
                         dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, current_rt_tol)
 
                         # push this dda scan parameter to the mass spec queue
-                        self.mass_spec.add_to_processing_queue(dda_scan_params)
+                        self.mass_spec.add_task(dda_scan_params)
                         fragmented_count += 1
                         # need to work out what we want to do here
                 else:
@@ -620,10 +620,10 @@ class HybridController(Controller):
                     dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, current_rt_tol)
 
                     # push this dda scan parameter to the mass spec queue
-                    self.mass_spec.add_to_processing_queue(dda_scan_params)
+                    self.mass_spec.add_task(dda_scan_params)
                     fragmented_count += 1
 
-            for param in self.mass_spec.get_processing_queue():
+            for param in self.mass_spec.get_task_queue():
                 precursor = param.get(ScanParameters.PRECURSOR)
                 if precursor is not None:
                     self.logger.debug('- %s' % str(precursor))
