@@ -9,6 +9,7 @@ from tqdm import tqdm
 from vimms.Common import POSITIVE, DEFAULT_MS1_SCAN_WINDOW, LoggerMixin
 from vimms.MassSpec import ScanParameters, MassSpectrometer
 from vimms.MzmlWriter import MzmlWriter
+from vimms.Roi import *
 
 
 class Controller(LoggerMixin):
@@ -56,6 +57,10 @@ class Controller(LoggerMixin):
 
 
 class SimpleMs1Controller(Controller):
+    """
+    A simple MS1 controller which does a full scan of the chemical sample, but no fragmentation
+    """
+
     def __init__(self, mass_spec):
         super().__init__(mass_spec)
         default_scan = ScanParameters()
@@ -106,6 +111,10 @@ class Precursor(object):
 
 
 class TopNController(Controller):
+    """
+    A Top-N controller. Does an MS1 scan followed by N fragmentation scans of the peaks with the highest intensity that are not excluded
+    """
+
     def __init__(self, mass_spec, N, isolation_window, mz_tol, rt_tol, min_ms1_intensity):
         super().__init__(mass_spec)
         self.last_ms1_scan = None
@@ -636,3 +645,192 @@ class HybridController(Controller):
         current_N = self.N[idx]
         current_rt_tol = self.rt_tol[idx]
         return current_N, current_rt_tol, idx
+
+
+class RoiTopNController(Controller):
+    def __init__(self, mass_spec, N, isolation_window, mz_tol, rt_tol, min_ms1_intensity, min_roi_intensity, min_roi_length, score_method, score_params=None):
+        super().__init__(mass_spec)
+        self.last_ms1_scan = None
+        self.N = N
+        self.isolation_window = isolation_window  # the isolation window (in Dalton) to select a precursor ion
+        self.mz_tol = mz_tol  # the m/z window (ppm) to prevent the same precursor ion to be fragmented again
+        self.rt_tol = rt_tol  # the rt window to prevent the same precursor ion to be fragmented again #TODO: remove
+        self.min_ms1_intensity = min_ms1_intensity  # minimum ms1 intensity to fragment
+
+        # ROI stuff
+        self.min_roi_intensity = min_roi_intensity
+        self.mz_tol = mz_tol
+        self.mz_units = 'Da'
+        self.min_roi_length = min_roi_length
+
+        # Score stuff
+        self.score_params = score_params
+        self.score_method = score_method
+
+        # Create ROI
+        self.live_roi = []
+        self.dead_roi = []
+        self.junk_roi = []
+        self.live_roi_fragmented = []
+        self.live_roi_last_rt = []  # last fragmentation time of ROI
+
+        mass_spec.reset()
+        mass_spec.current_N = N
+        mass_spec.current_DEW = rt_tol
+        mass_spec.use_exclusion_list = False
+
+        default_scan = ScanParameters()
+        default_scan.set(ScanParameters.MS_LEVEL, 1)
+        default_scan.set(ScanParameters.ISOLATION_WINDOWS, [[DEFAULT_MS1_SCAN_WINDOW]])
+        mass_spec.set_repeating_scan(default_scan)
+
+        # register new event handlers under this controller
+        mass_spec.register(MassSpectrometer.MS_SCAN_ARRIVED, self.handle_scan)
+        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_OPENING, self.handle_acquisition_open)
+        mass_spec.register(MassSpectrometer.ACQUISITION_STREAM_CLOSING, self.handle_acquisition_closing)
+
+    def run(self, min_time=None, max_time=None, progress_bar=True):
+        if min_time is None and max_time is None:
+            min_time = self.mass_spec.schedule["targetTime"].values[0]
+            max_time = self.mass_spec.schedule["targetTime"].values[-1]
+        if progress_bar:
+            with tqdm(total=max_time - min_time, initial=0) as pbar:
+                self.mass_spec.run(min_time, max_time, pbar=pbar)
+        else:
+            self.mass_spec.run(min_time, max_time)
+
+    def handle_acquisition_open(self):
+        self.logger.info('Time %f Acquisition open' % self.mass_spec.time)
+
+    def handle_acquisition_closing(self):
+        self.logger.info('Time %f Acquisition closing' % self.mass_spec.time)
+
+    def _process_scan(self, scan):
+        self.logger.info('Time %f Received from mass spec %s' % (self.mass_spec.time, scan))
+        if scan.ms_level == 1:  # we get an ms1 scan, if it has a peak, then store it for fragmentation next time
+            self._update_roi(scan)
+            if scan.num_peaks > 0:
+                self.last_ms1_scan = scan
+            else:
+                self.last_ms1_scan = None
+
+        elif scan.ms_level == 2:  # if we get ms2 scan, then do something with it
+            # scan.filter_intensity(self.min_ms2_intensity)
+            if scan.num_peaks > 0:
+                self._plot_scan(scan)
+
+    def _update_parameters(self, scan):
+
+        # if there's a previous ms1 scan to process
+        if self.last_ms1_scan is not None:
+
+            self.currrent_roi_mzs = [roi.get_mean_mz() for roi in self.live_roi]
+            self.current_roi_intensities = [roi.get_max_intensity() for roi in self.live_roi]
+            rt = self.last_ms1_scan.rt
+
+            # loop over points in decreasing intensity
+            self.fragmented_count = 0
+            idx = np.argsort(self.current_roi_intensities)[::-1]
+            for i in idx:
+                mz = self.currrent_roi_mzs[i]
+                intensity = self.current_roi_intensities[i]
+
+                # stopping criteria is after we've fragmented N ions or we found ion < min_intensity
+                if self.fragmented_count >= self.N:
+                    self.logger.debug('Time %f Top-%d ions have been selected' % (self.mass_spec.time, self.N))
+                    break
+
+                if intensity < self.min_ms1_intensity:
+                    self.logger.debug(
+                        'Time %f Minimum intensity threshold %f reached at %f, %d' % (
+                        self.mass_spec.time, self.min_ms1_intensity, intensity, self.fragmented_count))
+                    break
+
+                # skip ion in the dynamic exclusion list of the mass spec
+                if self.live_roi_fragmented[i]:
+                    continue
+                self.live_roi_fragmented[i] = True
+                self.live_roi_last_rt[i] = rt  #TODO: May want to update this to use the time of the MS2 scan
+
+                scores = self.get_scores(self.score_method, self.score_params)
+
+                # send a new ms2 scan parameter to the mass spec
+                dda_scan_params = ScanParameters()
+                dda_scan_params.set(ScanParameters.MS_LEVEL, 2)
+
+                # create precursor object, assume it's all singly charged
+                precursor_charge = +1 if (self.mass_spec.ionisation_mode == POSITIVE) else -1
+                precursor = Precursor(precursor_mz=mz, precursor_intensity=intensity,
+                                      precursor_charge=precursor_charge, precursor_scan_id=self.last_ms1_scan.scan_id)
+                mz_lower = mz - self.isolation_window  # Da
+                mz_upper = mz + self.isolation_window  # Da
+                isolation_windows = [[(mz_lower, mz_upper)]]
+                dda_scan_params.set(ScanParameters.ISOLATION_WINDOWS, isolation_windows)
+                dda_scan_params.set(ScanParameters.PRECURSOR, precursor)
+
+                # TODO: Maybe delete below lines
+                # save dynamic exclusion parameters too
+                dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_MZ_TOL, self.mz_tol)
+                dda_scan_params.set(ScanParameters.DYNAMIC_EXCLUSION_RT_TOL, self.rt_tol)
+
+                # push this dda scan parameter to the mass spec queue
+                self.mass_spec.add_to_queue(dda_scan_params)
+                self.fragmented_count += 1
+
+            for param in self.mass_spec.queue:
+                precursor = param.get(ScanParameters.PRECURSOR)
+                if precursor is not None:
+                    self.logger.debug('- %s' % str(precursor))
+
+                # set this ms1 scan as has been processed
+            self.last_ms1_scan = None
+
+    def _update_roi(self, new_scan):
+        if new_scan.ms_level == 1:
+            order = np.argsort(self.live_roi)
+            self.live_roi.sort()
+            self.live_roi_fragmented = np.array(self.live_roi_fragmented)[order].tolist()
+            self.live_roi_last_rt = np.array(self.live_roi_last_rt)[order].tolist()
+            current_ms1_scan_rt = new_scan.rt
+            not_grew = set(self.live_roi)
+            for idx in range(len(new_scan.intensities)):
+                intensity = new_scan.intensities[idx]
+                mz = new_scan.mzs[idx]
+                if intensity >= self.min_roi_intensity:
+                    match_roi = match(Roi(mz, 0, 0), self.live_roi, self.mz_tol, mz_units=self.mz_units)
+                    if match_roi:
+                        match_roi.add(mz, current_ms1_scan_rt, intensity)
+                        if match_roi in not_grew:
+                            not_grew.remove(match_roi)
+                    else:
+                        new_roi = Roi(mz, current_ms1_scan_rt, intensity)
+                        bisect.insort_right(self.live_roi, new_roi)
+                        self.live_roi_fragmented.insert(self.live_roi.index(new_roi), False)
+                        self.live_roi_last_rt.insert(self.live_roi.index(new_roi), None)
+
+            for roi in not_grew:
+                if roi.n >= self.min_roi_length:
+                    self.dead_roi.append(roi)
+                else:
+                    self.junk_roi.append(roi)
+                pos = self.live_roi.index(roi)
+                del self.live_roi[pos]
+                del self.live_roi_fragmented[pos]
+                del self.live_roi_last_rt[pos]
+
+    def get_scores(self, score_method, params):
+        if score_method == "Top N ROI":
+            # TODO: remove next if statement and just set self.rt_tol to Inf if None is specified
+            if self.rt_tol is None:  # Here we exclude if ROI has been fragmented
+                scores = np.log(self.current_roi_intensities) * (np.log(self.current_roi_intensities) > np.log(self.min_ms1_intensity)) * np.array([int(roi == "False") for roi in self.live_roi_fragmented])
+                # TODO: set scores to 0 if not in top N
+            else:
+                scores = 1
+
+
+
+
+
+
+
+        return scores
